@@ -20,13 +20,13 @@ jobs:
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
           
-          # Här är fixen: Vi tvingar GitHub att hantera mp4-filer som LFS (stora filer)
-          git lfs install
-          git lfs track "*.mp4"
-          git add .gitattributes
+          # LÖSNINGEN: Vi tar bort videofilerna helt innan vi skickar till HF
+          # Detta gör att Hugging Face inte blockerar uppladdningen.
+          rm comet/assets/*.mp4 || true
           
-          # Vi sparar ändringen om LFS behövs
-          git commit -m "Fix binary files for Hugging Face" || true
+          # Bekräfta borttagningen
+          git add .
+          git commit -m "Remove mp4 files for Hugging Face deployment" || true
           
-          # Nu skickar vi iväg det
+          # Skicka iväg koden (nu utan videofiler)
           git push --force https://oauth2:$HF_TOKEN@huggingface.co/spaces/omarzum/shihab main
