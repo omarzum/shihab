@@ -12,7 +12,21 @@ jobs:
         with:
           fetch-depth: 0
           lfs: true
+      
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push --force https://omarzum:$HF_TOKEN@huggingface.co/spaces/omarzum/shihab main
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          
+          # Här är fixen: Vi tvingar GitHub att hantera mp4-filer som LFS (stora filer)
+          git lfs install
+          git lfs track "*.mp4"
+          git add .gitattributes
+          
+          # Vi sparar ändringen om LFS behövs
+          git commit -m "Fix binary files for Hugging Face" || true
+          
+          # Nu skickar vi iväg det
+          git push --force https://oauth2:$HF_TOKEN@huggingface.co/spaces/omarzum/shihab main
