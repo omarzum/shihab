@@ -5,8 +5,8 @@ import time
 
 from loguru import logger
 
-from comet.core.log_levels import (CUSTOM_LOG_LEVELS, STANDARD_LOG_LEVELS,
-                                   get_level_info)
+from comet.core.log_levels import CUSTOM_LOG_LEVELS, STANDARD_LOG_LEVELS, get_level_info
+from comet.utils.parsing import associate_urls_credentials
 
 logging.getLogger("demagnetize").setLevel(
     logging.CRITICAL
@@ -16,18 +16,26 @@ logging.getLogger("demagnetize").setLevel(
 def setupLogger(level: str):
     # Configure custom log levels
     for level_name, level_config in CUSTOM_LOG_LEVELS.items():
-        logger.level(
-            level_name,
-            no=level_config["no"],
-            icon=level_config["icon"],
-            color=level_config["loguru_color"],
-        )
+        try:
+            logger.level(
+                level_name,
+                no=level_config["no"],
+                icon=level_config["icon"],
+                color=level_config["loguru_color"],
+            )
+        except ValueError:
+            pass
 
     # Configure standard log levels (override defaults)
     for level_name, level_config in STANDARD_LOG_LEVELS.items():
-        logger.level(
-            level_name, icon=level_config["icon"], color=level_config["loguru_color"]
-        )
+        try:
+            logger.level(
+                level_name,
+                icon=level_config["icon"],
+                color=level_config["loguru_color"],
+            )
+        except ValueError:
+            pass
 
     log_format = (
         "<white>{time:YYYY-MM-DD}</white> <magenta>{time:HH:mm:ss}</magenta> | "
@@ -143,6 +151,31 @@ logger.add(
 )
 
 
+def censor(text: str):
+    if not text:
+        return ""
+    if len(text) <= 4:
+        return "*" * len(text)
+    half = len(text) // 2
+    return text[:half] + "*" * (len(text) - half)
+
+
+def censor_url(url: str):
+    if not url:
+        return url
+    if "://" in url:
+        try:
+            scheme, rest = url.split("://", 1)
+            if "@" in rest:
+                auth, host = rest.split("@", 1)
+                if ":" in auth:
+                    user, password = auth.split(":", 1)
+                    return f"{scheme}://{user}:{censor(password)}@{host}"
+        except Exception:
+            pass
+    return url
+
+
 def log_scraper_error(
     scraper_name: str, scraper_url: str, media_id: str, error: Exception
 ):
@@ -150,13 +183,22 @@ def log_scraper_error(
     if "MediaFusion" in scraper_name:
         api_password_missing = " or your API password could be wrong"
 
-    logger.warning(
-        f"Exception while getting torrents for {media_id} with {scraper_name} ({scraper_url}), you are most likely being ratelimited{api_password_missing}: {error}"
-    )
+    error_str = str(error).lower()
+    is_timeout = "timeout" in error_str or "timeout" in type(error).__name__.lower()
+
+    if is_timeout:
+        logger.warning(
+            f"Timeout while getting torrents for {media_id} with {scraper_name} ({censor_url(scraper_url)})"
+        )
+    else:
+        logger.warning(
+            f"Exception while getting torrents for {media_id} with {scraper_name} ({censor_url(scraper_url)}), you are most likely being ratelimited{api_password_missing}: {error}"
+        )
 
 
 def log_startup_info(settings):
-    from comet.utils.parsing import associate_urls_credentials
+    from comet.core.database import IS_SQLITE
+    from comet.core.execution import max_workers
 
     def get_urls_with_passwords(urls, passwords):
         url_credentials_pairs = associate_urls_credentials(urls, passwords)
@@ -164,7 +206,7 @@ def log_startup_info(settings):
         result = []
         for url, password in url_credentials_pairs:
             if password:
-                result.append(f"{url}|{password}")
+                result.append(f"{url}|{censor(password)}")
             else:
                 result.append(url)
 
@@ -175,21 +217,117 @@ def log_startup_info(settings):
         f"Server started on http://{settings.FASTAPI_HOST}:{settings.FASTAPI_PORT} - {settings.FASTAPI_WORKERS} workers",
     )
     logger.log("COMET", f"Gunicorn Preload App: {settings.GUNICORN_PRELOAD_APP}")
+
     logger.log(
         "COMET",
-        f"Admin Dashboard Password: {settings.ADMIN_DASHBOARD_PASSWORD} -  http://{settings.FASTAPI_HOST}:{settings.FASTAPI_PORT}/admin - Public Metrics API: {settings.PUBLIC_METRICS_API}",
+        f"ProcessPoolExecutor: {max_workers} workers",
     )
+    logger.log(
+        "COMET",
+        f"HTTP Client Pool: limit={settings.HTTP_CLIENT_LIMIT} "
+        f"per_host={settings.HTTP_CLIENT_LIMIT_PER_HOST} "
+        f"timeout={settings.HTTP_CLIENT_TIMEOUT_TOTAL}s "
+        f"keepalive={settings.HTTP_CLIENT_KEEPALIVE_TIMEOUT}s "
+        f"dns_ttl={settings.HTTP_CLIENT_TTL_DNS_CACHE}s ",
+    )
+
+    if settings.PUBLIC_BASE_URL:
+        logger.log("COMET", f"Public Base URL: {settings.PUBLIC_BASE_URL}")
+
+    def _secret_source_label(source_raw: str, file_env: str):
+        if source_raw == "env":
+            return "from env"
+        if source_raw == "file":
+            return f"from {file_env}"
+        if source_raw == "generated-memory":
+            return "auto-generated (not persisted)"
+        if source_raw == "generated-file":
+            return f"auto-generated (persisted to {file_env})"
+        return "auto-generated"
+
+    admin_password = settings.ADMIN_DASHBOARD_PASSWORD
+    if "ADMIN_DASHBOARD_PASSWORD" in settings.model_fields_set:
+        admin_password = censor(admin_password)
+    else:
+        admin_password = f"{admin_password} (Randomly Generated)"
+    admin_session_ttl = settings.ADMIN_DASHBOARD_SESSION_TTL
+
+    logger.log(
+        "COMET",
+        f"Admin Dashboard Password: {admin_password} - http://{settings.FASTAPI_HOST}:{settings.FASTAPI_PORT}/admin - Session TTL: {admin_session_ttl}s - Public Metrics API: {settings.PUBLIC_METRICS_API}",
+    )
+
+    prometheus_auth = (
+        "Bearer token"
+        if settings.PROMETHEUS_AUTH_TOKEN
+        else (
+            "Bearer token file"
+            if settings.PROMETHEUS_AUTH_TOKEN_FILE
+            else "unprotected"
+        )
+    )
+    logger.log(
+        "COMET",
+        f"Prometheus: {settings.PROMETHEUS_ENABLED} - Path: {settings.PROMETHEUS_PATH} - Auth: {prometheus_auth}",
+    )
+
+    configure_password = settings.CONFIGURE_PAGE_PASSWORD
+    configure_session_ttl = settings.CONFIGURE_PAGE_SESSION_TTL
+    if configure_password:
+        if "CONFIGURE_PAGE_PASSWORD" in settings.model_fields_set:
+            configure_password = censor(configure_password)
+        else:
+            configure_password = f"{configure_password} (Randomly Generated)"
+    else:
+        configure_password = "Disabled"
+
+    logger.log(
+        "COMET",
+        f"Configure Page Password: {configure_password} - Session TTL: {configure_session_ttl}s",
+    )
+
+    logger.log(
+        "COMET",
+        f"Public API Token File: {settings.PUBLIC_API_TOKEN_FILE}",
+    )
+
+    stremio_api_prefix = settings.STREMIO_API_PREFIX
+    if stremio_api_prefix:
+        token_value = settings.PUBLIC_API_TOKEN
+        token_preview = (
+            f"{token_value[:6]}...{token_value[-4:]}"
+            if len(token_value) > 10
+            else censor(token_value)
+        )
+        token_source = _secret_source_label(
+            settings.PUBLIC_API_TOKEN_SOURCE,
+            "PUBLIC_API_TOKEN_FILE",
+        )
+
+        logger.log(
+            "COMET",
+            f"Protected Stremio API Prefix enabled: /s/{token_preview} ({token_source})",
+        )
 
     replicas = ""
-    if settings.DATABASE_TYPE != "sqlite":
+    if not IS_SQLITE:
         replicas = f" - Read Replicas: {settings.DATABASE_READ_REPLICA_URLS}"
-    logger.log(
-        "COMET",
-        f"Database ({settings.DATABASE_TYPE}): {settings.DATABASE_PATH if settings.DATABASE_TYPE == 'sqlite' else settings.DATABASE_URL} - TTL: metadata={settings.METADATA_CACHE_TTL}s, torrents={settings.TORRENT_CACHE_TTL}s, live_torrents={settings.LIVE_TORRENT_CACHE_TTL}s, debrid={settings.DEBRID_CACHE_TTL}s, metrics={settings.METRICS_CACHE_TTL}s - Debrid Ratio: {settings.DEBRID_CACHE_CHECK_RATIO} - Startup Cleanup Interval: {settings.DATABASE_STARTUP_CLEANUP_INTERVAL}s{replicas}",
+    force_ipv4_info = (
+        f" - Force IPv4: {settings.DATABASE_FORCE_IPV4_RESOLUTION}"
+        if not IS_SQLITE
+        else ""
+    )
+    memory_trim_interval = settings.MEMORY_TRIM_INTERVAL
+    memory_trim_value = (
+        f"{memory_trim_interval}s" if memory_trim_interval > 0 else "disabled"
     )
 
-    # SQLite concurrency warnings
-    if settings.DATABASE_TYPE == "sqlite":
+    logger.log(
+        "COMET",
+        f"Database ({settings.DATABASE_TYPE}): {settings.DATABASE_PATH if IS_SQLITE else censor_url(settings.DATABASE_URL)} - Batch Size: {settings.DATABASE_BATCH_SIZE} - TTL: metadata={settings.METADATA_CACHE_TTL}s, torrents={settings.TORRENT_CACHE_TTL}s, live_torrents={settings.LIVE_TORRENT_CACHE_TTL}s, debrid={settings.DEBRID_CACHE_TTL}s, metrics={settings.METRICS_CACHE_TTL}s - Debrid Ratio: {settings.DEBRID_CACHE_CHECK_RATIO} - Startup Cleanup Interval: {settings.DATABASE_STARTUP_CLEANUP_INTERVAL}s - Memory Trim Interval: {memory_trim_value}{force_ipv4_info}{replicas}",
+    )
+
+    if IS_SQLITE:
         logger.warning(
             "⚠️  SQLite has poor concurrency support and is NOT recommended for production. "
             "Consider using PostgreSQL for better performance and reliability."
@@ -207,9 +345,30 @@ def log_startup_info(settings):
 
     logger.log(
         "COMET",
-        f"Anime Mapping: source={settings.ANIME_MAPPING_SOURCE} - refresh_interval={settings.ANIME_MAPPING_REFRESH_INTERVAL}s",
+        "Filter Parse Cache: "
+        f"size={settings.FILTER_PARSE_CACHE_SIZE} "
+        f"shards={settings.FILTER_PARSE_CACHE_SHARDS} "
+        f"dedup_inflight={settings.FILTER_PARSE_CACHE_DEDUP_INFLIGHT}",
     )
-    logger.log("COMET", f"Bypass Proxy: {settings.BYPASS_PROXY_URL}")
+
+    anime_mapping_refresh = (
+        f" - Refresh Interval: {settings.ANIME_MAPPING_REFRESH_INTERVAL}s"
+        if settings.ANIME_MAPPING_ENABLED
+        else ""
+    )
+    logger.log(
+        "COMET",
+        f"Anime Mapping: {settings.ANIME_MAPPING_ENABLED}{anime_mapping_refresh}",
+    )
+
+    logger.log(
+        "COMET",
+        f"Global Proxy: {censor_url(settings.GLOBAL_PROXY_URL)} - Ethos: {settings.PROXY_ETHOS}",
+    )
+    logger.log(
+        "COMET",
+        f"Rate Limit Manager: Max Retries={settings.RATELIMIT_MAX_RETRIES} - Base Delay={settings.RATELIMIT_RETRY_BASE_DELAY}s",
+    )
 
     jackett_info = ""
     if settings.is_any_context_enabled(settings.SCRAPE_JACKETT):
@@ -246,11 +405,31 @@ def log_startup_info(settings):
         "COMET",
         f"Indexer Manager Update Interval: {settings.INDEXER_MANAGER_UPDATE_INTERVAL}s",
     )
+    indexer_languages = ", ".join(settings.INDEXER_LANGUAGES) or "Disabled"
+    logger.log(
+        "COMET",
+        "Indexer Title Search: "
+        f"INDEXER_INCLUDE_CANONICAL_TITLE={settings.INDEXER_INCLUDE_CANONICAL_TITLE} - "
+        f"INDEXER_INCLUDE_ORIGINAL_TITLE={settings.INDEXER_INCLUDE_ORIGINAL_TITLE} - "
+        f"INDEXER_LANGUAGES={indexer_languages}",
+    )
     logger.log("COMET", f"Get Torrent Timeout: {settings.GET_TORRENT_TIMEOUT}s")
     logger.log("COMET", f"Magnet Resolve Timeout: {settings.MAGNET_RESOLVE_TIMEOUT}s")
+    logger.log("COMET", f"Catalog Timeout: {settings.CATALOG_TIMEOUT}s")
+    logger.log("COMET", f"Scrape Lock TTL: {settings.SCRAPE_LOCK_TTL}s")
     logger.log(
-        "COMET", f"Download Torrent Files: {bool(settings.DOWNLOAD_TORRENT_FILES)}"
+        "COMET",
+        "Scrape Timeouts: "
+        f"live={settings.LIVE_SCRAPE_TIMEOUT:g}s, "
+        f"background={settings.BACKGROUND_SCRAPE_TIMEOUT:g}s",
     )
+    if settings.SCRAPER_TIMEOUT_OVERRIDES:
+        overrides = ", ".join(
+            f"{selector}={timeout:g}s"
+            for selector, timeout in sorted(settings.SCRAPER_TIMEOUT_OVERRIDES.items())
+        )
+        logger.log("COMET", f"Scraper Timeout Overrides: {overrides}")
+    logger.log("COMET", f"Download Torrent Files: {settings.DOWNLOAD_TORRENT_FILES}")
 
     comet_url = (
         f" - {settings.COMET_URL}"
@@ -259,17 +438,47 @@ def log_startup_info(settings):
     )
     logger.log(
         "COMET",
-        f"Comet Scraper: {settings.format_scraper_mode(settings.SCRAPE_COMET)}{comet_url}",
+        f"Comet Scraper: {settings.format_scraper_mode(settings.SCRAPE_COMET)}{comet_url} - Clean Tracker: {settings.COMET_CLEAN_TRACKER}",
     )
 
     nyaa_anime_only = (
-        f" - Anime Only: {bool(settings.NYAA_ANIME_ONLY)}"
+        f" - Anime Only: {settings.NYAA_ANIME_ONLY} - Concurrent Pages: {settings.NYAA_MAX_CONCURRENT_PAGES}"
         if settings.is_any_context_enabled(settings.SCRAPE_NYAA)
         else ""
     )
     logger.log(
         "COMET",
         f"Nyaa Scraper: {settings.format_scraper_mode(settings.SCRAPE_NYAA)}{nyaa_anime_only}",
+    )
+
+    animetosho_anime_only = (
+        f" - Anime Only: {settings.ANIMETOSHO_ANIME_ONLY} - Concurrent Pages: {settings.ANIMETOSHO_MAX_CONCURRENT_PAGES}"
+        if settings.is_any_context_enabled(settings.SCRAPE_ANIMETOSHO)
+        else ""
+    )
+    logger.log(
+        "COMET",
+        f"AnimeTosho Scraper: {settings.format_scraper_mode(settings.SCRAPE_ANIMETOSHO)}{animetosho_anime_only}",
+    )
+
+    seadex_anime_only = (
+        f" - Anime Only: {settings.SEADEX_ANIME_ONLY}"
+        if settings.is_any_context_enabled(settings.SCRAPE_SEADEX)
+        else ""
+    )
+    logger.log(
+        "COMET",
+        f"SeaDex Scraper: {settings.format_scraper_mode(settings.SCRAPE_SEADEX)}{seadex_anime_only}",
+    )
+
+    nekobt_anime_only = (
+        f" - Anime Only: {settings.NEKOBT_ANIME_ONLY}"
+        if settings.is_any_context_enabled(settings.SCRAPE_NEKOBT)
+        else ""
+    )
+    logger.log(
+        "COMET",
+        f"NekoBT Scraper: {settings.format_scraper_mode(settings.SCRAPE_NEKOBT)}{nekobt_anime_only}",
     )
 
     zilean_url = (
@@ -292,14 +501,14 @@ def log_startup_info(settings):
         f"StremThru Scraper: {settings.format_scraper_mode(settings.SCRAPE_STREMTHRU)}{stremthru_scrape_url}",
     )
 
-    bitmagnet_url = (
-        f" - {settings.BITMAGNET_URL}"
+    bitmagnet_info = (
+        f" - {settings.BITMAGNET_URL} - Concurrent Pages: {settings.BITMAGNET_MAX_CONCURRENT_PAGES} - Max Offset: {settings.BITMAGNET_MAX_OFFSET}"
         if settings.is_any_context_enabled(settings.SCRAPE_BITMAGNET)
         else ""
     )
     logger.log(
         "COMET",
-        f"Bitmagnet Scraper: {settings.format_scraper_mode(settings.SCRAPE_BITMAGNET)}{bitmagnet_url}",
+        f"Bitmagnet Scraper: {settings.format_scraper_mode(settings.SCRAPE_BITMAGNET)}{bitmagnet_info}",
     )
 
     torrentio_url = (
@@ -343,7 +552,7 @@ def log_startup_info(settings):
     )
 
     debridio_info = (
-        f" - {settings.DEBRIDIO_API_KEY} - {settings.DEBRIDIO_PROVIDER}|{settings.DEBRIDIO_PROVIDER_KEY}"
+        f" - {censor(settings.DEBRIDIO_API_KEY)} - {settings.DEBRIDIO_PROVIDER}|{censor(settings.DEBRIDIO_PROVIDER_KEY)}"
         if settings.is_any_context_enabled(settings.SCRAPE_DEBRIDIO)
         else ""
     )
@@ -353,7 +562,7 @@ def log_startup_info(settings):
     )
 
     torbox_api_key = (
-        f" - {settings.TORBOX_API_KEY}"
+        f" - {censor(settings.TORBOX_API_KEY)}"
         if settings.is_any_context_enabled(settings.SCRAPE_TORBOX)
         else ""
     )
@@ -362,42 +571,114 @@ def log_startup_info(settings):
         f"TorBox Scraper: {settings.format_scraper_mode(settings.SCRAPE_TORBOX)}{torbox_api_key}",
     )
 
-    yggtorrent_info = (
-        f" - Username: {settings.YGGTORRENT_USERNAME} - Password: {settings.YGGTORRENT_PASSWORD} - Passkey: {settings.YGGTORRENT_PASSKEY}"
-        if settings.is_any_context_enabled(settings.SCRAPE_YGGTORRENT)
+    logger.log(
+        "COMET",
+        f"TorrentsDB Scraper: {settings.format_scraper_mode(settings.SCRAPE_TORRENTSDB)}",
+    )
+
+    logger.log(
+        "COMET",
+        f"Peerflix Scraper: {settings.format_scraper_mode(settings.SCRAPE_PEERFLIX)}",
+    )
+
+    logger.log(
+        "COMET",
+        f"DMM Scraper: {settings.format_scraper_mode(settings.SCRAPE_DMM)}",
+    )
+    dmm_ingest_info = (
+        f" - Interval: {settings.DMM_INGEST_INTERVAL}s - Workers: {settings.DMM_INGEST_CONCURRENT_WORKERS} - Batch Size: {settings.DMM_INGEST_BATCH_SIZE}"
+        if settings.DMM_INGEST_ENABLED
         else ""
     )
     logger.log(
         "COMET",
-        f"YGGTorrent Scraper: {settings.format_scraper_mode(settings.SCRAPE_YGGTORRENT)}{yggtorrent_info}",
+        f"DMM Ingester: {settings.DMM_INGEST_ENABLED}{dmm_ingest_info}",
     )
 
+    proxy_stream_password = settings.PROXY_DEBRID_STREAM_PASSWORD
+    if "PROXY_DEBRID_STREAM_PASSWORD" in settings.model_fields_set:
+        proxy_stream_password = censor(proxy_stream_password)
+
     debrid_stream_proxy_display = (
-        f" - Password: {settings.PROXY_DEBRID_STREAM_PASSWORD} - Max Connections: {settings.PROXY_DEBRID_STREAM_MAX_CONNECTIONS} - Default Debrid Service: {settings.PROXY_DEBRID_STREAM_DEBRID_DEFAULT_SERVICE} - Default Debrid API Key: {settings.PROXY_DEBRID_STREAM_DEBRID_DEFAULT_APIKEY}"
+        f" - Password: {proxy_stream_password} - Max Connections: {settings.PROXY_DEBRID_STREAM_MAX_CONNECTIONS} - Inactivity Threshold: {settings.PROXY_DEBRID_STREAM_INACTIVITY_THRESHOLD}s - Default Debrid Service: {settings.PROXY_DEBRID_STREAM_DEBRID_DEFAULT_SERVICE} - Default Debrid API Key: {censor(settings.PROXY_DEBRID_STREAM_DEBRID_DEFAULT_APIKEY)}"
         if settings.PROXY_DEBRID_STREAM
         else ""
     )
     logger.log(
         "COMET",
-        f"Debrid Stream Proxy: {bool(settings.PROXY_DEBRID_STREAM)}{debrid_stream_proxy_display}",
+        f"Debrid Stream Proxy: {settings.PROXY_DEBRID_STREAM}{debrid_stream_proxy_display}",
     )
 
     logger.log("COMET", f"StremThru URL: {settings.STREMTHRU_URL}")
-
     logger.log(
         "COMET",
-        f"Disable Torrent Streams: {bool(settings.DISABLE_TORRENT_STREAMS)}",
+        "Debrid Account Scrape: "
+        f"refresh={settings.DEBRID_ACCOUNT_SCRAPE_REFRESH_INTERVAL}s "
+        f"ttl={settings.DEBRID_ACCOUNT_SCRAPE_CACHE_TTL}s "
+        f"max_snapshot={settings.DEBRID_ACCOUNT_SCRAPE_MAX_SNAPSHOT_ITEMS} "
+        f"max_match={settings.DEBRID_ACCOUNT_SCRAPE_MAX_MATCH_ITEMS} "
+        f"warm_timeout={settings.DEBRID_ACCOUNT_SCRAPE_INITIAL_WARM_TIMEOUT}s ",
     )
 
-    logger.log("COMET", f"Remove Adult Content: {bool(settings.REMOVE_ADULT_CONTENT)}")
+    disabled_streams_info = (
+        f" - Name: {settings.TORRENT_DISABLED_STREAM_NAME} - URL: {settings.TORRENT_DISABLED_STREAM_URL} - Description: {settings.TORRENT_DISABLED_STREAM_DESCRIPTION}"
+        if settings.DISABLE_TORRENT_STREAMS
+        else ""
+    )
+    logger.log(
+        "COMET",
+        f"Disable Torrent Streams: {settings.DISABLE_TORRENT_STREAMS}{disabled_streams_info}",
+    )
+
+    logger.log("COMET", f"Remove Adult Content: {settings.REMOVE_ADULT_CONTENT}")
+    logger.log(
+        "COMET", f"Smart Language Detection: {settings.SMART_LANGUAGE_DETECTION}"
+    )
+    logger.log("COMET", f"RTN Filter Debug: {settings.RTN_FILTER_DEBUG}")
+    logger.log("COMET", f"Digital Release Filter: {settings.DIGITAL_RELEASE_FILTER}")
+    logger.log(
+        "COMET",
+        f"TMDB Read Access Token: {censor(settings.TMDB_READ_ACCESS_TOKEN) if settings.TMDB_READ_ACCESS_TOKEN else 'Shared'}",
+    )
     logger.log("COMET", f"Custom Header HTML: {bool(settings.CUSTOM_HEADER_HTML)}")
 
+    http_cache_info = (
+        f" - Streams TTL: {settings.HTTP_CACHE_STREAMS_TTL}s - Manifest TTL: {settings.HTTP_CACHE_MANIFEST_TTL}s - Configure TTL: {settings.HTTP_CACHE_CONFIGURE_TTL}s - SWR: {settings.HTTP_CACHE_STALE_WHILE_REVALIDATE}s"
+        if settings.HTTP_CACHE_ENABLED
+        else ""
+    )
+    logger.log(
+        "COMET",
+        f"HTTP Cache: {settings.HTTP_CACHE_ENABLED}{http_cache_info}",
+    )
+
     background_scraper_display = (
-        f" - Workers: {settings.BACKGROUND_SCRAPER_CONCURRENT_WORKERS} - Interval: {settings.BACKGROUND_SCRAPER_INTERVAL}s - Max Movies/Run: {settings.BACKGROUND_SCRAPER_MAX_MOVIES_PER_RUN} - Max Series/Run: {settings.BACKGROUND_SCRAPER_MAX_SERIES_PER_RUN}"
+        f" - Workers: {settings.BACKGROUND_SCRAPER_CONCURRENT_WORKERS} - Interval: {settings.BACKGROUND_SCRAPER_INTERVAL}s - Max Movies/Run: {settings.BACKGROUND_SCRAPER_MAX_MOVIES_PER_RUN} - Max Series/Run: {settings.BACKGROUND_SCRAPER_MAX_SERIES_PER_RUN} - Success TTL: {settings.BACKGROUND_SCRAPER_SUCCESS_TTL}s - Episode Refresh TTL: {settings.BACKGROUND_SCRAPER_EPISODE_REFRESH_TTL}s - Retry Backoff: {settings.BACKGROUND_SCRAPER_FAILURE_BASE_BACKOFF}s..{settings.BACKGROUND_SCRAPER_FAILURE_MAX_BACKOFF}s - Max Retries: {settings.BACKGROUND_SCRAPER_MAX_RETRIES} - Runtime Budget: {settings.BACKGROUND_SCRAPER_RUN_TIME_BUDGET}s - Demand Priority: {settings.BACKGROUND_SCRAPER_ENABLE_DEMAND_PRIORITY} - Min Priority: {settings.BACKGROUND_SCRAPER_MIN_PRIORITY_SCORE} - Priority Decay: {settings.BACKGROUND_SCRAPER_PRIORITY_DECAY_ON_MISS} - Defer Cooldown: {settings.BACKGROUND_SCRAPER_DEFER_COOLDOWN}s - Queue Watermarks: {settings.BACKGROUND_SCRAPER_QUEUE_LOW_WATERMARK}/{settings.BACKGROUND_SCRAPER_QUEUE_HIGH_WATERMARK} - Queue Hard Cap: {settings.BACKGROUND_SCRAPER_QUEUE_HARD_CAP}"
         if settings.BACKGROUND_SCRAPER_ENABLED
         else ""
     )
     logger.log(
         "COMET",
-        f"Background Scraper: {bool(settings.BACKGROUND_SCRAPER_ENABLED)}{background_scraper_display}",
+        f"Background Scraper: {settings.BACKGROUND_SCRAPER_ENABLED}{background_scraper_display}",
     )
+
+    logger.log(
+        "COMET",
+        f"Generic Trackers: {settings.DOWNLOAD_GENERIC_TRACKERS}",
+    )
+
+    if settings.COMETNET_RELAY_URL:
+        logger.log(
+            "COMET",
+            f"CometNet P2P: Relay Mode - {settings.COMETNET_RELAY_URL}",
+        )
+    elif settings.COMETNET_ENABLED:
+        logger.log(
+            "COMET",
+            "CometNet P2P: Integrated Mode",
+        )
+    else:
+        logger.log(
+            "COMET",
+            "CometNet P2P: False",
+        )

@@ -3,8 +3,18 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from comet.core.database import build_upsert_assignments
 from comet.core.logger import logger
-from comet.core.models import database
+from comet.core.models import database, settings
+from comet.observability import metrics
+
+_BANDWIDTH_UPSERT_ASSIGNMENTS = build_upsert_assignments(("total_bytes", "updated_at"))
+UPSERT_BANDWIDTH_STATS_QUERY = f"""
+    INSERT INTO bandwidth_stats (id, total_bytes, updated_at)
+    VALUES (1, :total_bytes, :timestamp)
+    ON CONFLICT (id) DO UPDATE SET
+{_BANDWIDTH_UPSERT_ASSIGNMENTS}
+"""
 
 
 @dataclass
@@ -67,7 +77,10 @@ class BandwidthMonitor:
             pass
 
         # Start background tasks
-        self._cleanup_task = asyncio.create_task(self._cleanup_inactive_connections())
+        if settings.PROXY_DEBRID_STREAM_INACTIVITY_THRESHOLD > 0:
+            self._cleanup_task = asyncio.create_task(
+                self._cleanup_inactive_connections()
+            )
         self._db_sync_task = asyncio.create_task(self._sync_to_database())
 
         self._initialized = True
@@ -77,13 +90,14 @@ class BandwidthMonitor:
             await self.initialize()
 
         with self._lock:
-            metrics = ConnectionMetrics(
+            connection = ConnectionMetrics(
                 connection_id=connection_id,
                 ip=ip,
                 content=content,
                 start_time=time.time(),
             )
-            self._connections[connection_id] = metrics
+            is_new = connection_id not in self._connections
+            self._connections[connection_id] = connection
 
             # Update global stats
             self._global_stats["active_connections"] = len(self._connections)
@@ -91,6 +105,8 @@ class BandwidthMonitor:
                 self._global_stats["peak_concurrent"],
                 self._global_stats["active_connections"],
             )
+            if is_new:
+                metrics.proxy_connection_started()
 
     def update_connection(self, connection_id: str, bytes_chunk: int):
         with self._lock:
@@ -101,27 +117,15 @@ class BandwidthMonitor:
 
     async def end_connection(self, connection_id: str):
         with self._lock:
-            metrics = self._connections.pop(connection_id, None)
-            if metrics:
+            connection = self._connections.pop(connection_id, None)
+            if connection:
                 self._global_stats["active_connections"] = len(self._connections)
+                connection.duration = time.time() - connection.start_time
+                metrics.proxy_connection_finished(
+                    connection.bytes_transferred, connection.duration
+                )
 
-                # Log final metrics (only once at end, no spam)
-                # total_mb = metrics.bytes_transferred / (1024 * 1024)
-                # avg_speed_mbps = (
-                #     (metrics.bytes_transferred / metrics.duration / (1024 * 1024))
-                #     if metrics.duration > 0
-                #     else 0
-                # )
-                # logger.log(
-                #     "STREAM",
-                #     f"Stream ended - {connection_id[:8]} - {total_mb:.1f}MB in {metrics.duration:.1f}s (avg: {avg_speed_mbps:.1f}MB/s)",
-                # )
-
-            return metrics
-
-    def get_connection_metrics(self, connection_id: str):
-        with self._lock:
-            return self._connections.get(connection_id)
+            return connection
 
     def get_all_active_connections(self):
         with self._lock:
@@ -150,24 +154,61 @@ class BandwidthMonitor:
             return f"{bytes_per_second / (1024**3):.2f} GB/s"
 
     async def _cleanup_inactive_connections(self):
+        threshold = settings.PROXY_DEBRID_STREAM_INACTIVITY_THRESHOLD
+        # min 5s, max 60s, or 1/5th of threshold
+        sleep_interval = max(5, min(60, threshold // 5))
+
         while True:
             try:
-                await asyncio.sleep(30)  # Check every 30 seconds
+                await asyncio.sleep(sleep_interval)
+
                 current_time = time.time()
 
                 with self._lock:
                     inactive_connections = [
-                        conn_id
-                        for conn_id, metrics in self._connections.items()
-                        if current_time - metrics.last_update > 60  # 60 seconds timeout
+                        (conn_id, connection)
+                        for conn_id, connection in self._connections.items()
+                        if current_time - connection.last_update > threshold
                     ]
 
-                # Remove inactive connections
-                for conn_id in inactive_connections:
-                    await self.end_connection(conn_id)
+                    for conn_id, connection in inactive_connections:
+                        self._connections.pop(conn_id, None)
+                        connection.duration = current_time - connection.start_time
+                        metrics.proxy_connection_finished(
+                            connection.bytes_transferred, connection.duration
+                        )
+
+                    if inactive_connections:
+                        self._global_stats["active_connections"] = len(
+                            self._connections
+                        )
+
+                if not inactive_connections:
+                    continue
+
+                try:
+                    placeholders = ", ".join(
+                        f":id_{i}" for i in range(len(inactive_connections))
+                    )
+                    params = {
+                        f"id_{i}": conn_id
+                        for i, (conn_id, _) in enumerate(inactive_connections)
+                    }
+                    await database.execute(
+                        f"DELETE FROM active_connections WHERE id IN ({placeholders})",
+                        params,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Error batch cleaning {len(inactive_connections)} inactive connections from DB: {e}"
+                    )
 
             except Exception as e:
                 logger.warning(f"Error in bandwidth monitor cleanup: {e}")
+
+    async def _persist_total_bytes(self, total_bytes: int, sync_timestamp: float):
+        params = {"total_bytes": total_bytes, "timestamp": sync_timestamp}
+        await database.execute(UPSERT_BANDWIDTH_STATS_QUERY, params)
 
     async def _sync_to_database(self):
         while True:
@@ -181,18 +222,8 @@ class BandwidthMonitor:
                         continue
 
                 # Update database with alltime total
-                try:
-                    # Try to insert first
-                    await database.execute(
-                        "INSERT INTO bandwidth_stats (id, total_bytes, last_updated) VALUES (1, :total_bytes, :timestamp)",
-                        {"total_bytes": total_bytes, "timestamp": time.time()},
-                    )
-                except Exception:
-                    # If insert fails (record exists), update instead
-                    await database.execute(
-                        "UPDATE bandwidth_stats SET total_bytes = :total_bytes, last_updated = :timestamp WHERE id = 1",
-                        {"total_bytes": total_bytes, "timestamp": time.time()},
-                    )
+                sync_timestamp = time.time()
+                await self._persist_total_bytes(total_bytes, sync_timestamp)
 
                 with self._lock:
                     self._last_synced_bytes = total_bytes
@@ -201,10 +232,35 @@ class BandwidthMonitor:
                 logger.warning(f"Error syncing bandwidth stats to database: {e}")
 
     async def shutdown(self):
-        if self._cleanup_task:
-            self._cleanup_task.cancel()
-        if self._db_sync_task:
-            self._db_sync_task.cancel()
+        tasks = [
+            task
+            for task in (self._cleanup_task, self._db_sync_task)
+            if task is not None
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        with self._lock:
+            total_bytes = self._global_stats["total_bytes_alltime"]
+        if total_bytes != self._last_synced_bytes:
+            try:
+                await self._persist_total_bytes(total_bytes, time.time())
+            except Exception as exc:
+                logger.warning(f"Error syncing final bandwidth stats: {exc}")
+            else:
+                self._last_synced_bytes = total_bytes
+
+        self._cleanup_task = None
+        self._db_sync_task = None
+        self._initialized = False
+
+        with self._lock:
+            self._connections.clear()
+            self._global_stats["active_connections"] = 0
+            self._global_stats["total_bytes_session"] = 0
+            self._global_stats["peak_concurrent"] = 0
 
 
 bandwidth_monitor = BandwidthMonitor()

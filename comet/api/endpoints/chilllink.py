@@ -1,13 +1,9 @@
-import random
-import string
-from typing import Optional
-
 from fastapi import APIRouter, BackgroundTasks, Query, Request
 
 from comet.api.endpoints.stream import stream as get_streams
 from comet.core.config_validation import config_check
 from comet.core.models import settings
-from comet.debrid.manager import get_debrid_extension
+from comet.debrid.manager import build_addon_name
 
 router = APIRouter()
 
@@ -24,20 +20,23 @@ router = APIRouter()
     summary="Add-on Manifest",
     description="Returns the add-on manifest with existing configuration.",
 )
-async def chilllink_manifest(request: Request, b64config: str = None):
-    config = config_check(b64config)
+async def chilllink_manifest(request: Request, b64config: str | None = None):
+    config = config_check(b64config, strict_b64config=True)
 
     manifest = {
-        "id": f"{settings.ADDON_ID}.{''.join(random.choice(string.ascii_letters) for _ in range(4))}",
+        "id": settings.ADDON_ID,
         "version": "2.0.0",
         "description": "Chillio's fastest debrid search add-on.",
         "supported_endpoints": {"feeds": None, "streams": "/streams"},
+        "name": build_addon_name(settings.ADDON_NAME, config)
+        if config
+        else "❌ | Comet",
     }
 
-    debrid_extension = get_debrid_extension(config["debridService"])
-    manifest["name"] = (
-        f"{settings.ADDON_NAME}{(' | ' + debrid_extension) if debrid_extension != 'TORRENT' else ''}"
-    )
+    if not config:
+        manifest["description"] = (
+            f"OBSOLETE CONFIGURATION, PLEASE RE-CONFIGURE ON {request.url.scheme}://{request.url.netloc}"
+        )
 
     return manifest
 
@@ -59,18 +58,32 @@ async def chilllink_streams(
     background_tasks: BackgroundTasks,
     imdbID: str = Query(...),
     type: str = Query(...),
-    season: Optional[int] = Query(None),
-    episode: Optional[int] = Query(None),
-    b64config: Optional[str] = None,
+    season: int | None = Query(None),
+    episode: int | None = Query(None),
+    b64config: str | None = None,
 ):
-    config = config_check(b64config)
-    if config["debridService"] == "torrent":
+    config = config_check(b64config, strict_b64config=True)
+    if not config:
+        return {
+            "sources": [
+                {
+                    "id": "comet.fast",
+                    "title": "Configuration is invalid. Please reconfigure Comet.",
+                    "url": "https://comet.feels.legal",
+                    "metadata": [],
+                }
+            ]
+        }
+
+    debrid_entries = config["_debridEntries"]
+
+    if not debrid_entries:
         return {
             "sources": [
                 {
                     "id": "comet.fast",
                     "title": "You need to configure a debrid service to use Comet in Chillio.",
-                    "url": "https://comet.fast",
+                    "url": "https://comet.feels.legal",
                     "metadata": [],
                 }
             ]
@@ -79,7 +92,11 @@ async def chilllink_streams(
     if type == "movie":
         media_id = imdbID
     elif type == "series":
-        media_id = f"{imdbID}:{season}:{episode}"
+        media_id = imdbID
+        if season is not None:
+            media_id += f":{season}"
+            if episode is not None:
+                media_id += f":{episode}"
     else:
         return {"sources": []}
 
@@ -92,17 +109,15 @@ async def chilllink_streams(
         chilllink=True,
     )
 
-    stremio_streams = stremio_response.get("streams", [])
-
-    sources = []
-    for stream in stremio_streams:
-        sources.append(
-            {
-                "id": stream["behaviorHints"]["bingeGroup"],
-                "title": stream["behaviorHints"]["filename"],
-                "url": stream["url"],
-                "metadata": stream["_chilllink"],
-            }
-        )
+    stremio_streams = stremio_response["streams"]
+    sources = [
+        {
+            "id": stream["behaviorHints"]["bingeGroup"],
+            "title": stream["behaviorHints"]["filename"],
+            "url": stream["url"],
+            "metadata": stream["_chilllink"],
+        }
+        for stream in stremio_streams
+    ]
 
     return {"sources": sources}

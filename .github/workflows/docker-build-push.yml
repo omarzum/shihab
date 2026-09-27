@@ -2,67 +2,35 @@ name: Docker Build and Push
 
 on:
   push:
-    branches:
-      - main
-      - development
+    branches: ["**"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
-      security-events: write
+  build-and-push-release:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development'
+    uses: ./.github/workflows/docker-build-common.yml
+    with:
+      push-to-dockerhub: true
+      tags: |
+        type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+        type=raw,value=dev,enable=${{ github.ref == 'refs/heads/development' }}
+        type=ref,event=branch
+      build-args: |
+        COMET_BRANCH=${{ github.ref_name }}
+    secrets:
+      dockerhub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
+      dockerhub_access_token: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4.1.2
-
-    - name: Docker Setup QEMU
-      uses: docker/setup-qemu-action@v3
-      id: qemu
-      with:
-        platforms: amd64,arm64
-
-    - name: Log into ghcr.io registry
-      uses: docker/login-action@v3.1.0
-      with:
-        registry: ghcr.io
-        username: ${{ github.repository_owner }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3.2.0
-
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v3.1.0
-      with:
-        username: ${{ secrets.DOCKER_HUB_USERNAME }}
-        password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
-
-    - name: Get branch name
-      id: branch-name
-      run: echo "branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
-
-    - name: Set Docker tags
-      id: docker_tags
-      run: |
-        if [ "${{ steps.branch-name.outputs.branch }}" = "main" ]; then
-          echo "tags=ghcr.io/g0ldyy/comet:latest,docker.io/g0ldyy/comet:latest" >> $GITHUB_OUTPUT
-        elif [ "${{ steps.branch-name.outputs.branch }}" = "development" ]; then
-          echo "tags=ghcr.io/g0ldyy/comet:dev,docker.io/g0ldyy/comet:dev" >> $GITHUB_OUTPUT
-        else
-          echo "tags=ghcr.io/g0ldyy/comet:${{ steps.branch-name.outputs.branch }},docker.io/g0ldyy/comet:${{ steps.branch-name.outputs.branch }}" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5.3.0
-      with:
-        context: .
-        file: ./Dockerfile
-        platforms: linux/amd64,linux/arm64
-        push: true
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        tags: ${{ steps.docker_tags.outputs.tags }}
+  build-and-push-branch:
+    if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/development'
+    uses: ./.github/workflows/docker-build-common.yml
+    with:
+      tags: |
+        type=ref,event=branch
+        type=sha,prefix=sha-
+      build-args: |
+        COMET_BRANCH=${{ github.ref_name }}

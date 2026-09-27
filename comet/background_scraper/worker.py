@@ -1,340 +1,1347 @@
 import asyncio
+import math
 import time
+import uuid
 from dataclasses import dataclass
 
-import aiohttp
-
+from comet.core.database import database
 from comet.core.logger import logger
-from comet.core.models import database, settings
+from comet.core.models import settings
+from comet.core.scrape import ScrapeContext
 from comet.metadata.manager import MetadataScraper
+from comet.observability import metrics
+from comet.services.cache_state import mark_scope_scraped
+from comet.services.lock import DistributedLock
 from comet.services.orchestration import TorrentManager
+from comet.utils.http_client import http_client_manager
+from comet.utils.year import parse_year_range
 
 from .cinemata_client import CinemataClient
+
+LOCK_KEY = "background_scraper_lock"
+LOCK_TTL = 60
+BACKGROUND_SCRAPER_RUNS_PROJECTION = """
+            run_id, started_at, finished_at, status,
+            processed_count AS processed,
+            success_count AS success,
+            failed_count AS failed,
+            torrents_found_count AS torrents_found,
+            duration_ms, worker_count, last_error
+"""
+BACKGROUND_SCRAPER_RUN_FIELDS = frozenset(
+    {
+        "run_id",
+        "started_at",
+        "finished_at",
+        "status",
+        "processed",
+        "success",
+        "failed",
+        "torrents_found",
+        "duration_ms",
+        "worker_count",
+        "last_error",
+    }
+)
+BACKGROUND_SCRAPER_RUN_STATUSES = frozenset(
+    {"running", "completed", "cancelled", "failed"}
+)
+
+
+def _require_nonnegative_int(value, field_name: str) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{field_name} must be a non-negative integer")
+    return value
+
+
+def _require_finite_timestamp(value, field_name: str) -> float:
+    if type(value) is not float or not math.isfinite(value) or value < 0:
+        raise ValueError(f"{field_name} must be a finite non-negative timestamp")
+    return value
+
+
+def _database_record_dict(row, field_name: str) -> dict:
+    if row is None:
+        raise TypeError(f"{field_name} must be a database record")
+    try:
+        return dict(row)
+    except (TypeError, ValueError) as error:
+        raise TypeError(f"{field_name} must be a database record") from error
+
+
+def _queue_ready_at_sql(table_alias: str) -> str:
+    created_at = f"COALESCE({table_alias}.created_at, :now)"
+    return f"""
+        CASE
+            WHEN {table_alias}.last_success_at IS NOT NULL
+             AND {table_alias}.last_success_at + :success_ttl >= {created_at}
+             AND (
+                    {table_alias}.next_retry_at IS NULL
+                    OR {table_alias}.last_success_at + :success_ttl
+                       >= {table_alias}.next_retry_at
+                 )
+            THEN {table_alias}.last_success_at + :success_ttl
+            WHEN {table_alias}.next_retry_at IS NOT NULL
+             AND {table_alias}.next_retry_at >= {created_at}
+            THEN {table_alias}.next_retry_at
+            ELSE {created_at}
+        END
+    """
+
+
+def _serialize_run_row(row) -> dict:
+    candidate = _database_record_dict(row, "background scraper run")
+    if set(candidate) != BACKGROUND_SCRAPER_RUN_FIELDS:
+        raise ValueError("background scraper run has an invalid field set")
+
+    run_id = candidate["run_id"]
+    if type(run_id) is not str:
+        raise ValueError("background scraper run_id must be a canonical UUID")
+    try:
+        is_canonical_run_id = str(uuid.UUID(run_id)) == run_id
+    except ValueError:
+        is_canonical_run_id = False
+    if not is_canonical_run_id:
+        raise ValueError("background scraper run_id must be a canonical UUID")
+
+    status = candidate["status"]
+    if type(status) is not str or status not in BACKGROUND_SCRAPER_RUN_STATUSES:
+        raise ValueError("background scraper run has an invalid status")
+
+    started_at = _require_finite_timestamp(candidate["started_at"], "started_at")
+    finished_value = candidate["finished_at"]
+    finished_at = (
+        None
+        if finished_value is None
+        else _require_finite_timestamp(finished_value, "finished_at")
+    )
+    if finished_at is not None and finished_at < started_at:
+        raise ValueError("background scraper run finishes before it starts")
+    if (status == "running") != (finished_at is None):
+        raise ValueError("background scraper run status and finished_at disagree")
+
+    last_error = candidate["last_error"]
+    if last_error is not None and type(last_error) is not str:
+        raise ValueError("background scraper last_error must be a string or null")
+
+    return {
+        "run_id": run_id,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "status": status,
+        "processed": _require_nonnegative_int(candidate["processed"], "processed"),
+        "success": _require_nonnegative_int(candidate["success"], "success"),
+        "failed": _require_nonnegative_int(candidate["failed"], "failed"),
+        "torrents_found": _require_nonnegative_int(
+            candidate["torrents_found"], "torrents_found"
+        ),
+        "duration_ms": _require_nonnegative_int(
+            candidate["duration_ms"], "duration_ms"
+        ),
+        "worker_count": _require_nonnegative_int(
+            candidate["worker_count"], "worker_count"
+        ),
+        "last_error": last_error,
+    }
 
 
 @dataclass
 class ScrapingStats:
+    run_id: str = ""
     total_processed: int = 0
+    total_success: int = 0
+    total_failed: int = 0
     total_torrents_found: int = 0
+    discovered_items: int = 0
     errors: int = 0
     start_time: float = 0.0
 
     @property
-    def duration(self):
-        return time.time() - self.start_time if self.start_time else 0
+    def duration(self) -> float:
+        return time.time() - self.start_time if self.start_time else 0.0
 
 
 class BackgroundScraperWorker:
     def __init__(self):
         self.is_running = False
-        self.current_session = None
-        self.metadata_scraper = None
-        self.semaphore = None
+        self.is_paused = False
+        self.pause_event = asyncio.Event()
+        self.pause_event.set()
+        self.current_run_id = None
+        self.last_error = None
         self.stats = ScrapingStats()
+        self.metadata_scraper = None
+        self.task: asyncio.Task | None = None
+        self._active_scrape_task = None
+        self._drain_requested = False
+        self._last_discovery_limit_normalization = None
+        self._reset_discovery_hysteresis()
+
+    def _reset_discovery_hysteresis(self):
+        self._discovery_paused_for_backlog = False
+
+    def clear_finished_task(self):
+        if not self.task or not self.task.done():
+            return
+
+        if not self.task.cancelled():
+            try:
+                error = self.task.exception()
+                if error:
+                    self.last_error = str(error)
+                    logger.error(f"Background scraper task failed: {error}")
+            except Exception as e:
+                self.last_error = str(e)
+                logger.error(f"Background scraper task failed: {e}")
+        self.task = None
+
+    async def _cancel_task(self, task: asyncio.Task | None):
+        if not task or task.done():
+            return
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    def _queue_query_context(self, now: float | None = None):
+        current_now = now if now is not None else time.time()
+        success_ttl = settings.BACKGROUND_SCRAPER_SUCCESS_TTL
+        return current_now, {
+            "now": current_now,
+            "success_cutoff": current_now - success_ttl,
+            "success_ttl": success_ttl,
+            "max_retries": self._max_retries_for_query(),
+        }
+
+    async def _fetch_queue_snapshot(self, now: float | None = None):
+        current_now, query_context = self._queue_query_context(now=now)
+        item_ready_at_sql = _queue_ready_at_sql("i")
+        episode_ready_at_sql = _queue_ready_at_sql("e")
+
+        queue_snapshot = await database.fetch_one(
+            f"""
+            WITH ready_items AS (
+                SELECT
+                    i.media_id,
+                    i.media_type,
+                    {item_ready_at_sql} AS ready_at
+                FROM background_scraper_items i
+                WHERE (i.next_retry_at IS NULL OR i.next_retry_at <= :now)
+                  AND (i.last_success_at IS NULL OR i.last_success_at <= :success_cutoff)
+                  AND (i.status != 'dead' OR i.consecutive_failures < :max_retries)
+            ),
+            item_snapshot AS (
+                SELECT
+                    COALESCE(SUM(CASE WHEN media_type = 'movie' THEN 1 ELSE 0 END), 0) AS movie_count,
+                    COALESCE(SUM(CASE WHEN media_type = 'series' THEN 1 ELSE 0 END), 0) AS series_count,
+                    MIN(ready_at) AS oldest_item_ts
+                FROM ready_items
+            ),
+            episode_candidates AS (
+                SELECT
+                    i.ready_at AS parent_ready_at,
+                    {episode_ready_at_sql} AS episode_ready_at
+                FROM background_scraper_episodes e
+                JOIN ready_items i
+                  ON i.media_id = e.series_id
+                 AND i.media_type = 'series'
+                WHERE e.season >= 1
+                  AND e.episode >= 1
+                  AND (e.next_retry_at IS NULL OR e.next_retry_at <= :now)
+                  AND (e.last_success_at IS NULL OR e.last_success_at <= :success_cutoff)
+                  AND (e.status != 'dead' OR e.consecutive_failures < :max_retries)
+            ),
+            ready_episodes AS (
+                SELECT
+                    CASE
+                        WHEN parent_ready_at >= episode_ready_at
+                        THEN parent_ready_at
+                        ELSE episode_ready_at
+                    END AS ready_at
+                FROM episode_candidates
+            ),
+            episode_snapshot AS (
+                SELECT
+                    COUNT(*) AS episode_count,
+                    MIN(ready_at) AS oldest_episode_ts
+                FROM ready_episodes
+            )
+            SELECT item_snapshot.*, episode_snapshot.*
+            FROM item_snapshot
+            CROSS JOIN episode_snapshot
+            """,
+            query_context,
+            force_primary=True,
+        )
+
+        queue_snapshot = _database_record_dict(
+            queue_snapshot, "background scraper queue snapshot"
+        )
+        if set(queue_snapshot) != {
+            "movie_count",
+            "series_count",
+            "oldest_item_ts",
+            "episode_count",
+            "oldest_episode_ts",
+        }:
+            raise ValueError("background scraper queue snapshot has an invalid schema")
+
+        oldest_item_value = queue_snapshot["oldest_item_ts"]
+        oldest_episode_value = queue_snapshot["oldest_episode_ts"]
+        oldest_item_ts = (
+            None
+            if oldest_item_value is None
+            else _require_finite_timestamp(oldest_item_value, "oldest_item_ts")
+        )
+        oldest_episode_ts = (
+            None
+            if oldest_episode_value is None
+            else _require_finite_timestamp(oldest_episode_value, "oldest_episode_ts")
+        )
+        candidate_timestamps = [
+            ts for ts in (oldest_item_ts, oldest_episode_ts) if ts is not None
+        ]
+        oldest_queue_age_s = (
+            max(0.0, current_now - float(min(candidate_timestamps)))
+            if candidate_timestamps
+            else 0.0
+        )
+        queue_movies = _require_nonnegative_int(
+            queue_snapshot["movie_count"], "movie_count"
+        )
+        queue_series = _require_nonnegative_int(
+            queue_snapshot["series_count"], "series_count"
+        )
+        queue_episodes = _require_nonnegative_int(
+            queue_snapshot["episode_count"], "episode_count"
+        )
+        total_queue = queue_movies + queue_series + queue_episodes
+
+        snapshot = {
+            "movies": queue_movies,
+            "series": queue_series,
+            "episodes": queue_episodes,
+            "total": total_queue,
+            "oldest_age_s": oldest_queue_age_s,
+        }
+        metrics.set_background_queue(snapshot)
+        return snapshot
+
+    def _discovery_queue_limits(self):
+        low = max(0, settings.BACKGROUND_SCRAPER_QUEUE_LOW_WATERMARK)
+        high = max(0, settings.BACKGROUND_SCRAPER_QUEUE_HIGH_WATERMARK)
+        hard = max(0, settings.BACKGROUND_SCRAPER_QUEUE_HARD_CAP)
+        configured_low, configured_high, configured_hard = low, high, hard
+        corrections = []
+
+        if high <= 0 and hard > 0:
+            high = hard
+            corrections.append("high<=0 with hard>0, set high=hard")
+        if high > 0 and (low <= 0 or low > high):
+            low = max(1, high // 2)
+            corrections.append("low invalid for high, auto-derived low")
+        if hard > 0 and high > 0 and hard < high:
+            hard = high
+            corrections.append("hard<high, promoted hard to high")
+
+        if corrections:
+            normalization_signature = (
+                configured_low,
+                configured_high,
+                configured_hard,
+                low,
+                high,
+                hard,
+            )
+            if self._last_discovery_limit_normalization != normalization_signature:
+                logger.warning(
+                    "BACKGROUND_SCRAPER: Normalized queue limits "
+                    f"low/high/hard={configured_low}/{configured_high}/{configured_hard} "
+                    f"-> {low}/{high}/{hard} ({'; '.join(corrections)})"
+                )
+                self._last_discovery_limit_normalization = normalization_signature
+        else:
+            self._last_discovery_limit_normalization = None
+
+        return low, high, hard
+
+    def _evaluate_discovery_policy(self, total_queue: int, update_state: bool = True):
+        low, high, hard = self._discovery_queue_limits()
+        paused_for_backlog = self._discovery_paused_for_backlog
+
+        def set_paused(value: bool):
+            nonlocal paused_for_backlog
+            paused_for_backlog = value
+            if update_state:
+                self._discovery_paused_for_backlog = value
+
+        if high <= 0 and hard <= 0:
+            set_paused(False)
+            return (
+                True,
+                None,
+                {"low": low, "high": high, "hard": hard},
+                paused_for_backlog,
+            )
+
+        if hard > 0 and total_queue >= hard:
+            set_paused(True)
+            return (
+                False,
+                "hard_cap_reached",
+                {"low": low, "high": high, "hard": hard},
+                paused_for_backlog,
+            )
+
+        if paused_for_backlog:
+            if low > 0 and total_queue <= low:
+                set_paused(False)
+            else:
+                return (
+                    False,
+                    "above_low_watermark",
+                    {"low": low, "high": high, "hard": hard},
+                    paused_for_backlog,
+                )
+
+        if high > 0 and total_queue >= high:
+            set_paused(True)
+            return (
+                False,
+                "above_high_watermark",
+                {"low": low, "high": high, "hard": hard},
+                paused_for_backlog,
+            )
+
+        return (
+            True,
+            None,
+            {"low": low, "high": high, "hard": hard},
+            paused_for_backlog,
+        )
+
+    def _apply_discovery_headroom(
+        self,
+        movies_target: int,
+        series_target: int,
+        total_queue: int,
+        discovery_limits: dict,
+    ):
+        target_total = max(0, movies_target) + max(0, series_target)
+        if target_total <= 0:
+            return 0, 0
+
+        queue_cap = int(discovery_limits.get("high") or 0)
+        if queue_cap <= 0:
+            queue_cap = int(discovery_limits.get("hard") or 0)
+        if queue_cap <= 0:
+            return max(0, movies_target), max(0, series_target)
+
+        headroom = max(0, queue_cap - max(0, total_queue))
+        if headroom <= 0:
+            return 0, 0
+        if headroom >= target_total:
+            return max(0, movies_target), max(0, series_target)
+
+        movies_weight = max(0, movies_target)
+        series_weight = max(0, series_target)
+        weighted_total = movies_weight + series_weight
+        if weighted_total <= 0:
+            return 0, 0
+
+        movies_capped = min(
+            movies_weight, int((headroom * movies_weight) / weighted_total)
+        )
+        series_capped = min(series_weight, headroom - movies_capped)
+        allocated = movies_capped + series_capped
+        leftover = headroom - allocated
+        if leftover > 0:
+            add_movies = min(movies_weight - movies_capped, leftover)
+            movies_capped += add_movies
+            leftover -= add_movies
+            if leftover > 0:
+                add_series = min(series_weight - series_capped, leftover)
+                series_capped += add_series
+
+        return movies_capped, series_capped
+
+    def _planning_batch_size_per_type(self):
+        workers = max(1, settings.BACKGROUND_SCRAPER_CONCURRENT_WORKERS)
+        return max(500, min(10000, workers * 500))
+
+    async def _run_items_in_bounded_chunks(
+        self, planned_items: list[dict], deadline: float | None
+    ):
+        if not planned_items:
+            return
+
+        worker_limit = max(1, settings.BACKGROUND_SCRAPER_CONCURRENT_WORKERS)
+        next_item_index = 0
+        in_flight: set[asyncio.Task] = set()
+        scheduling_stopped = False
+
+        async def _defer_remaining():
+            nonlocal next_item_index
+            if next_item_index >= len(planned_items):
+                return
+            await self._defer_items(
+                [
+                    (item["media_id"], int(item["consecutive_failures"]))
+                    for item in planned_items[next_item_index:]
+                ]
+            )
+            next_item_index = len(planned_items)
+
+        async def _start_next_item() -> bool:
+            nonlocal next_item_index
+            if next_item_index >= len(planned_items):
+                return False
+            if not self.is_running:
+                return False
+
+            await self._wait_if_paused()
+            if not self.is_running:
+                return False
+            if deadline is not None and time.time() > deadline:
+                return False
+
+            item = planned_items[next_item_index]
+            next_item_index += 1
+            in_flight.add(
+                asyncio.create_task(self._scrape_single_media(item, deadline))
+            )
+            return True
+
+        try:
+            while len(in_flight) < worker_limit and next_item_index < len(
+                planned_items
+            ):
+                if not await _start_next_item():
+                    scheduling_stopped = True
+                    await _defer_remaining()
+                    break
+
+            while in_flight:
+                done, pending = await asyncio.wait(
+                    in_flight, return_when=asyncio.FIRST_COMPLETED
+                )
+                in_flight = set(pending)
+
+                for task in done:
+                    try:
+                        task.result()
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception as result:
+                        self.last_error = str(result)
+                        logger.error(
+                            f"Unhandled error while processing planned items: {result}"
+                        )
+
+                if scheduling_stopped:
+                    continue
+
+                while len(in_flight) < worker_limit and next_item_index < len(
+                    planned_items
+                ):
+                    if not await _start_next_item():
+                        scheduling_stopped = True
+                        await _defer_remaining()
+                        break
+        finally:
+            if in_flight:
+                for task in in_flight:
+                    task.cancel()
+                await asyncio.gather(*in_flight, return_exceptions=True)
 
     async def start(self):
         if self.is_running:
             logger.log("BACKGROUND_SCRAPER", "Background scraper is already running")
             return
 
-        logger.log("BACKGROUND_SCRAPER", "Starting background scraper")
+        self._drain_requested = False
+        logger.log("BACKGROUND_SCRAPER", "Starting background scraper orchestrator")
         await self._run_continuous()
 
     async def stop(self):
-        logger.log("BACKGROUND_SCRAPER", "Stopping background scraper")
+        logger.log("BACKGROUND_SCRAPER", "Stopping background scraper orchestrator")
         self.is_running = False
+        self.is_paused = False
+        self._drain_requested = False
+        self.pause_event.set()
 
-        await database.execute(
-            "UPDATE background_scraper_progress SET is_running = FALSE, current_phase = 'stopped' WHERE id = 1"
+        await self._cancel_task(self._active_scrape_task)
+        self._active_scrape_task = None
+
+        task = self.task
+        current_task = asyncio.current_task()
+        if task and task is not current_task:
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                self.last_error = str(e)
+                logger.error(f"Background scraper task stopped with error: {e}")
+        self.task = None
+        self._reset_discovery_hysteresis()
+
+    async def drain(self) -> bool:
+        """Stop after the active cycle, or immediately when no cycle is active."""
+        if not self.is_running:
+            return False
+
+        if self.current_run_id is None:
+            await self.stop()
+            return False
+
+        if not self._drain_requested:
+            self._drain_requested = True
+            logger.log(
+                "BACKGROUND_SCRAPER",
+                f"Run {self.current_run_id}: stop scheduled after completion",
+            )
+        return True
+
+    def cancel_drain(self) -> bool:
+        if not self.is_running or not self._drain_requested:
+            return False
+
+        self._drain_requested = False
+        logger.log("BACKGROUND_SCRAPER", "Scheduled stop cancelled")
+        return True
+
+    async def pause(self):
+        if not self.is_running:
+            return False
+
+        self.is_paused = True
+        self.pause_event.clear()
+        logger.log("BACKGROUND_SCRAPER", "Background scraper paused")
+        return True
+
+    async def resume(self):
+        if not self.is_running:
+            return False
+
+        self.is_paused = False
+        self.pause_event.set()
+        logger.log("BACKGROUND_SCRAPER", "Background scraper resumed")
+        return True
+
+    async def get_status(self):
+        now = time.time()
+        lookback_24h = now - 86400
+
+        latest_run = await database.fetch_one(
+            f"""
+            SELECT {BACKGROUND_SCRAPER_RUNS_PROJECTION}
+            FROM background_scraper_runs
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
         )
 
-        if self.current_session:
-            await self.current_session.close()
+        queue_snapshot = await self._fetch_queue_snapshot(now=now)
+        dead_items_rows = await database.fetch_all(
+            """
+            SELECT media_type, COUNT(*) AS count
+            FROM background_scraper_items
+            WHERE status = 'dead'
+            GROUP BY media_type
+            """
+        )
+        dead_item_counts = {"movie": 0, "series": 0}
+        for row in dead_items_rows:
+            dead_item_row = _database_record_dict(row, "dead item count")
+            if set(dead_item_row) != {"media_type", "count"}:
+                raise ValueError("dead item count has an invalid schema")
+            media_type = dead_item_row["media_type"]
+            if type(media_type) is not str or media_type not in dead_item_counts:
+                raise ValueError("dead item count has an invalid media_type")
+            dead_item_counts[media_type] = _require_nonnegative_int(
+                dead_item_row["count"], f"dead_{media_type}_count"
+            )
+        dead_episodes = await database.fetch_val(
+            """
+            SELECT COUNT(*) FROM background_scraper_episodes
+            WHERE season >= 1
+              AND episode >= 1
+              AND status = 'dead'
+            """
+        )
+        run_agg = await database.fetch_one(
+            """
+            SELECT
+                COALESCE(SUM(processed_count), 0) AS processed,
+                COALESCE(SUM(success_count), 0) AS success,
+                COALESCE(SUM(failed_count), 0) AS failed,
+                COALESCE(SUM(torrents_found_count), 0) AS torrents_found,
+                COUNT(*) AS run_count
+            FROM background_scraper_runs
+            WHERE started_at >= :lookback_24h
+            """,
+            {"lookback_24h": lookback_24h},
+        )
+        run_agg = _database_record_dict(run_agg, "background scraper run aggregate")
+        if set(run_agg) != {
+            "processed",
+            "success",
+            "failed",
+            "torrents_found",
+            "run_count",
+        }:
+            raise ValueError("background scraper run aggregate has an invalid schema")
+        processed_24h = _require_nonnegative_int(run_agg["processed"], "processed_24h")
+        failed_24h = _require_nonnegative_int(run_agg["failed"], "failed_24h")
+        torrents_24h = _require_nonnegative_int(
+            run_agg["torrents_found"], "torrents_found_24h"
+        )
+        _require_nonnegative_int(run_agg["success"], "success_24h")
+        _require_nonnegative_int(run_agg["run_count"], "run_count_24h")
+        fail_rate_24h = (failed_24h / processed_24h) if processed_24h > 0 else 0.0
+        torrents_per_item_24h = (
+            (torrents_24h / processed_24h) if processed_24h > 0 else 0.0
+        )
+        total_queue = queue_snapshot["total"]
+        oldest_queue_age_s = queue_snapshot["oldest_age_s"]
+        (
+            discovery_allowed,
+            discovery_reason,
+            discovery_limits,
+            paused_for_backlog,
+        ) = self._evaluate_discovery_policy(total_queue, update_state=False)
+        health = self._compute_health_status(
+            fail_rate_24h=fail_rate_24h,
+            processed_24h=processed_24h,
+            oldest_queue_age_s=oldest_queue_age_s,
+            total_queue=total_queue,
+        )
+
+        return {
+            "running": self.is_running,
+            "paused": self.is_paused,
+            "draining": self._drain_requested,
+            "current_run_id": self.current_run_id,
+            "last_error": self.last_error,
+            "stats": {
+                "run_id": self.stats.run_id,
+                "processed": self.stats.total_processed,
+                "success": self.stats.total_success,
+                "failed": self.stats.total_failed,
+                "torrents_found": self.stats.total_torrents_found,
+                "discovered_items": self.stats.discovered_items,
+                "errors": self.stats.errors,
+                "duration_s": round(self.stats.duration, 2),
+            },
+            "queue": {
+                "movies": queue_snapshot["movies"],
+                "series": queue_snapshot["series"],
+                "episodes": queue_snapshot["episodes"],
+                "oldest_age_s": round(oldest_queue_age_s, 2),
+            },
+            "discovery": {
+                "allowed": discovery_allowed,
+                "paused_for_backlog": paused_for_backlog,
+                "reason": discovery_reason,
+                "queue_low_watermark": discovery_limits["low"],
+                "queue_high_watermark": discovery_limits["high"],
+                "queue_hard_cap": discovery_limits["hard"],
+            },
+            "dead": {
+                "movies": dead_item_counts["movie"],
+                "series": dead_item_counts["series"],
+                "episodes": _require_nonnegative_int(
+                    dead_episodes, "dead_episode_count"
+                ),
+            },
+            "slo": {
+                "window_seconds": 86400,
+                "processed": processed_24h,
+                "failed": failed_24h,
+                "torrents_found": torrents_24h,
+                "fail_rate": round(fail_rate_24h, 4),
+                "torrents_per_processed": round(torrents_per_item_24h, 4),
+            },
+            "health": health,
+            "actions": {
+                "can_drain": (
+                    self.is_running
+                    and self.current_run_id is not None
+                    and not self._drain_requested
+                ),
+                "can_cancel_drain": self.is_running and self._drain_requested,
+                "can_requeue_dead": True,
+            },
+            "latest_run": _serialize_run_row(latest_run) if latest_run else None,
+        }
+
+    async def get_recent_runs(self, limit: int = 20):
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("run limit must be an integer between 1 and 200")
+        rows = await database.fetch_all(
+            f"""
+            SELECT {BACKGROUND_SCRAPER_RUNS_PROJECTION}
+            FROM background_scraper_runs
+            ORDER BY started_at DESC
+            LIMIT :limit
+            """,
+            {"limit": limit},
+        )
+        return [_serialize_run_row(row) for row in rows]
 
     async def _run_continuous(self):
         self.is_running = True
-
         interval_seconds = settings.BACKGROUND_SCRAPER_INTERVAL
 
-        while self.is_running:
-            try:
-                await self._run_scraping_cycle()
+        try:
+            while self.is_running:
+                next_cycle_delay = interval_seconds
+                try:
+                    lock = DistributedLock(LOCK_KEY, timeout=LOCK_TTL)
+                    if await lock.acquire(wait_timeout=None):
+                        try:
+                            scrape_task = asyncio.create_task(
+                                self._run_scraping_cycle()
+                            )
+                            self._active_scrape_task = scrape_task
+                            await lock.run(scrape_task)
+                        finally:
+                            await lock.release()
+                            self._active_scrape_task = None
+                    else:
+                        logger.log(
+                            "BACKGROUND_SCRAPER",
+                            "Another instance is running background scraping. Skipping.",
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    self.last_error = str(e)
+                    next_cycle_delay = 300
+                    logger.error(f"Error in background scraper loop: {e}")
 
-                if self.is_running:
+                if self._drain_requested:
                     logger.log(
                         "BACKGROUND_SCRAPER",
-                        f"Waiting {interval_seconds}s until next run",
+                        "Scheduled stop completed; no new cycle will be started",
                     )
-                    await asyncio.sleep(interval_seconds)
+                    self._drain_requested = False
+                    break
 
-            except Exception as e:
-                logger.error(f"Error in background scraper cycle: {e}")
-                await asyncio.sleep(300)
+                if self.is_running:
+                    await asyncio.sleep(next_cycle_delay)
+        finally:
+            self.is_running = False
+            self.is_paused = False
+            self._drain_requested = False
+            self.pause_event.set()
+            self._reset_discovery_hysteresis()
 
     async def _run_scraping_cycle(self):
-        # Clean up potentially stale state from previous crashes
-        current_time = time.time()
-        progress_row = await database.fetch_one(
-            "SELECT current_run_started_at, is_running FROM background_scraper_progress WHERE id = 1"
-        )
+        run_id = str(uuid.uuid4())
+        self.current_run_id = run_id
+        self.stats = ScrapingStats(run_id=run_id, start_time=time.time())
 
-        if progress_row and progress_row["is_running"]:
-            # If the last run started more than 6 hours ago, consider it crashed
-            time_since_start = current_time - (
-                progress_row["current_run_started_at"] or 0
+        run_status = "completed"
+        run_error = None
+        try:
+            await self._insert_run_row(run_id)
+        except BaseException:
+            self.current_run_id = None
+            self.metadata_scraper = None
+            raise
+
+        try:
+            await self._wait_if_paused()
+            if not self.is_running:
+                run_status = "cancelled"
+                return
+            await self._reset_running_items()
+
+            session = await http_client_manager.get_session()
+            self.metadata_scraper = MetadataScraper(session)
+
+            max_movies = max(0, settings.BACKGROUND_SCRAPER_MAX_MOVIES_PER_RUN)
+            max_series = max(0, settings.BACKGROUND_SCRAPER_MAX_SERIES_PER_RUN)
+            discovery_multiplier = max(
+                1, settings.BACKGROUND_SCRAPER_DISCOVERY_MULTIPLIER
             )
-            if time_since_start > 21600:  # 6 hours
+            queue_snapshot = await self._fetch_queue_snapshot()
+            (
+                discovery_allowed,
+                discovery_reason,
+                discovery_limits,
+                _,
+            ) = self._evaluate_discovery_policy(queue_snapshot["total"])
+
+            if discovery_allowed:
+                discovery_target_movies = max_movies * discovery_multiplier
+                discovery_target_series = max_series * discovery_multiplier
+                (
+                    discovery_target_movies,
+                    discovery_target_series,
+                ) = self._apply_discovery_headroom(
+                    discovery_target_movies,
+                    discovery_target_series,
+                    queue_snapshot["total"],
+                    discovery_limits,
+                )
                 logger.log(
                     "BACKGROUND_SCRAPER",
-                    f"⚠️ Cleaning up stale state from previous run ({time_since_start / 3600:.1f}h ago)",
+                    f"Run {run_id}: queue={queue_snapshot['total']} discovery targets movie={discovery_target_movies}, series={discovery_target_series}",
                 )
-                await database.execute(
-                    "UPDATE background_scraper_progress SET is_running = FALSE WHERE id = 1"
-                )
+
+                if discovery_target_movies > 0:
+                    self.stats.discovered_items += await self._discover_media_type(
+                        session, "movie", discovery_target_movies
+                    )
+                    if not self.is_running:
+                        run_status = "cancelled"
+                        return
+                if discovery_target_series > 0:
+                    self.stats.discovered_items += await self._discover_media_type(
+                        session, "series", discovery_target_series
+                    )
+                    if not self.is_running:
+                        run_status = "cancelled"
+                        return
             else:
                 logger.log(
                     "BACKGROUND_SCRAPER",
-                    "Another scraper instance is already running, skipping",
+                    f"Run {run_id}: discovery paused ({discovery_reason}) queue={queue_snapshot['total']} watermarks={discovery_limits['low']}/{discovery_limits['high']} hard_cap={discovery_limits['hard']}",
                 )
-                return
+
+            runtime_budget = settings.BACKGROUND_SCRAPER_RUN_TIME_BUDGET
+            deadline = (
+                self.stats.start_time + runtime_budget
+                if runtime_budget and runtime_budget > 0
+                else None
+            )
+            planning_batch_size = self._planning_batch_size_per_type()
+            remaining_movies = max_movies
+            remaining_series = max_series
+            planned_movies_total = 0
+            planned_series_total = 0
+
+            while self.is_running and (remaining_movies > 0 or remaining_series > 0):
+                await self._wait_if_paused()
+                if not self.is_running:
+                    run_status = "cancelled"
+                    return
+                if deadline is not None and time.time() > deadline:
+                    break
+
+                batch_movies_limit = min(remaining_movies, planning_batch_size)
+                batch_series_limit = min(remaining_series, planning_batch_size)
+                planned_movies = (
+                    await self._plan_items("movie", batch_movies_limit)
+                    if batch_movies_limit > 0
+                    else []
+                )
+                planned_series = (
+                    await self._plan_items("series", batch_series_limit)
+                    if batch_series_limit > 0
+                    else []
+                )
+                planned_items = planned_movies + planned_series
+                if not planned_items:
+                    break
+
+                planned_movies_count = len(planned_movies)
+                planned_series_count = len(planned_series)
+                planned_movies_total += planned_movies_count
+                planned_series_total += planned_series_count
+                remaining_movies = max(0, remaining_movies - planned_movies_count)
+                remaining_series = max(0, remaining_series - planned_series_count)
+
+                await self._run_items_in_bounded_chunks(planned_items, deadline)
+
+            logger.log(
+                "BACKGROUND_SCRAPER",
+                f"Run {run_id}: planned {planned_movies_total + planned_series_total} items "
+                f"({planned_movies_total} movies, {planned_series_total} series)",
+            )
+
+        except asyncio.CancelledError:
+            run_status = "cancelled"
+            raise
+        except Exception as e:
+            run_status = "failed"
+            run_error = str(e)
+            self.last_error = str(e)
+            logger.error(f"Run {run_id} failed: {e}")
+        finally:
+            try:
+                try:
+                    await self._reset_running_items()
+                finally:
+                    await self._finalize_run_row(run_id, run_status, run_error)
+            finally:
+                logger.log(
+                    "BACKGROUND_SCRAPER",
+                    f"Run {run_id} finished with status={run_status} "
+                    f"processed={self.stats.total_processed} success={self.stats.total_success} "
+                    f"failed={self.stats.total_failed} torrents={self.stats.total_torrents_found} "
+                    f"discovered={self.stats.discovered_items} duration={self.stats.duration:.2f}s",
+                )
+                metrics.observe_background_run(run_status, self.stats)
+                self.current_run_id = None
+                self.metadata_scraper = None
+
+    async def _insert_run_row(self, run_id: str):
+        now = time.time()
+        await database.execute(
+            """
+            UPDATE background_scraper_runs
+            SET status = 'cancelled',
+                finished_at = :finished_at,
+                duration_ms = CAST((:finished_at - started_at) * 1000 AS INTEGER),
+                last_error = COALESCE(last_error, 'Recovered stale running row')
+            WHERE status = 'running'
+            """,
+            {"finished_at": now},
+        )
 
         await database.execute(
             """
-            INSERT INTO background_scraper_progress (id, current_run_started_at, is_running, current_phase)
-            VALUES (1, :start_time, TRUE, 'starting')
-            ON CONFLICT (id) DO UPDATE SET
-                current_run_started_at = :start_time,
-                is_running = TRUE,
-                current_phase = 'starting'
+            INSERT INTO background_scraper_runs
+            (run_id, started_at, status, worker_count)
+            VALUES (:run_id, :started_at, :status, :worker_count)
             """,
-            {"start_time": time.time()},
+            {
+                "run_id": run_id,
+                "started_at": now,
+                "status": "running",
+                "worker_count": max(1, settings.BACKGROUND_SCRAPER_CONCURRENT_WORKERS),
+            },
         )
 
-        self.stats = ScrapingStats()
-        self.stats.start_time = time.time()
-
-        try:
-            self.current_session = aiohttp.ClientSession()
-            self.metadata_scraper = MetadataScraper(self.current_session)
-            self.semaphore = asyncio.Semaphore(
-                settings.BACKGROUND_SCRAPER_CONCURRENT_WORKERS
-            )
-
-            logger.log(
-                "BACKGROUND_SCRAPER",
-                f"Starting scraping cycle with {settings.BACKGROUND_SCRAPER_CONCURRENT_WORKERS} concurrent workers",
-            )
-
-            await self._scrape_media_type(
-                "movie", settings.BACKGROUND_SCRAPER_MAX_MOVIES_PER_RUN
-            )
-
-            await self._scrape_media_type(
-                "series", settings.BACKGROUND_SCRAPER_MAX_SERIES_PER_RUN
-            )
-
-            await database.execute(
-                """
-                UPDATE background_scraper_progress 
-                SET last_completed_run_at = :end_time,
-                    is_running = FALSE,
-                    current_phase = 'completed'
-                WHERE id = 1
-                """,
-                {"end_time": time.time()},
-            )
-
-            logger.log(
-                "BACKGROUND_SCRAPER",
-                f"Scraping cycle completed. Processed: {self.stats.total_processed}, "
-                f"Torrents found: {self.stats.total_torrents_found}, "
-                f"Errors: {self.stats.errors}, "
-                f"Duration: {self.stats.duration:.2f}s",
-            )
-
-        except Exception as e:
-            logger.error(f"Error in scraping cycle: {e}")
-            await database.execute(
-                "UPDATE background_scraper_progress SET is_running = FALSE, current_phase = 'error' WHERE id = 1"
-            )
-        finally:
-            if self.current_session:
-                await self.current_session.close()
-                self.current_session = None
-
-    async def _scrape_media_type(self, media_type: str, max_items: int):
-        if max_items <= 0:
-            logger.log(
-                "BACKGROUND_SCRAPER",
-                f"Skipping {media_type} scraping (max_items={max_items})",
-            )
-            return
-
-        logger.log(
-            "BACKGROUND_SCRAPER", f"Starting {media_type} scraping (max: {max_items})"
-        )
+    async def _finalize_run_row(self, run_id: str, status: str, last_error: str | None):
+        finished_at = time.time()
+        duration_ms = int((finished_at - self.stats.start_time) * 1000)
 
         await database.execute(
-            f"UPDATE background_scraper_progress SET current_phase = 'scraping_{media_type}' WHERE id = 1"
+            """
+            UPDATE background_scraper_runs
+            SET finished_at = :finished_at,
+                status = :status,
+                processed_count = :processed,
+                success_count = :success,
+                failed_count = :failed,
+                torrents_found_count = :torrents_found,
+                duration_ms = :duration_ms,
+                last_error = :last_error
+            WHERE run_id = :run_id
+            """,
+            {
+                "run_id": run_id,
+                "finished_at": finished_at,
+                "status": status,
+                "processed": self.stats.total_processed,
+                "success": self.stats.total_success,
+                "failed": self.stats.total_failed,
+                "torrents_found": self.stats.total_torrents_found,
+                "duration_ms": duration_ms,
+                "last_error": last_error,
+            },
         )
 
-        async with CinemataClient() as cinemata_client:
-            processed_count = 0
-            tasks = []
+    async def _wait_if_paused(self):
+        if not self.is_paused:
+            return
+        await self.pause_event.wait()
 
-            media_generator = cinemata_client.fetch_all_of_type(media_type)
+    async def _discover_media_type(
+        self, session, media_type: str, max_discovery_items: int
+    ) -> int:
+        if max_discovery_items <= 0:
+            return 0
 
-            async for media_item in media_generator:
-                if not self.is_running or processed_count >= max_items:
+        discovered = 0
+        batch = []
+        now = time.time()
+        current_year = time.gmtime().tm_year
+        success_cutoff = now - settings.BACKGROUND_SCRAPER_SUCCESS_TTL
+        blocked_cache: dict[str, bool] = {}
+
+        async with CinemataClient(session=session) as cinemata_client:
+            async for media_item in cinemata_client.fetch_all_of_type(media_type):
+                if not self.is_running:
+                    break
+                await self._wait_if_paused()
+                if not self.is_running:
                     break
 
-                if await self._should_skip_media(media_item["imdb_id"]):
+                normalized = self._normalize_media_item(
+                    media_item, media_type, now, current_year
+                )
+                if not normalized:
                     continue
 
-                task = asyncio.create_task(
-                    self._scrape_single_media(media_item, media_type)
-                )
-                tasks.append(task)
-
-                processed_count += 1
-
-                if len(tasks) >= settings.BACKGROUND_SCRAPER_CONCURRENT_WORKERS * 2:
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                    tasks.clear()
-
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-
-        if media_type == "movie":
-            await database.execute(
-                "UPDATE background_scraper_progress SET total_movies_processed = total_movies_processed + :count WHERE id = 1",
-                {"count": processed_count},
-            )
-        else:
-            await database.execute(
-                "UPDATE background_scraper_progress SET total_series_processed = total_series_processed + :count WHERE id = 1",
-                {"count": processed_count},
-            )
-
-        logger.log(
-            "BACKGROUND_SCRAPER",
-            f"Completed {media_type} scraping. Processed: {processed_count} unique items",
-        )
-
-    async def _should_skip_media(self, media_id: str):
-        """Check if media should be skipped (recently scraped or too many failures)."""
-        row = await database.fetch_one(
-            "SELECT scraped_at, scrape_failed_attempts FROM background_scraper_state WHERE media_id = :media_id",
-            {"media_id": media_id},
-        )
-
-        if not row:
-            return False
-
-        # Skip if scraped within the last 7 days
-        seven_days_ago = time.time() - (7 * 24 * 3600)
-        if row["scraped_at"] and row["scraped_at"] > seven_days_ago:
-            return True
-
-        # Skip if too many failed attempts (more than 3)
-        if row["scrape_failed_attempts"] and row["scrape_failed_attempts"] > 3:
-            return True
-
-        return False
-
-    async def _scrape_single_media(self, media_item, media_type: str):
-        async with self.semaphore:
-            media_id = media_item["imdb_id"]
-            title = media_item["name"]
-
-            year = media_item["year"]
-            year_end = None
-            if "–" in year:
-                splitted = year.split("–")
-                if splitted[1]:
-                    year = int(splitted[0])
-                    year_end = int(splitted[1])
+                media_id = normalized["media_id"]
+                if media_id in blocked_cache:
+                    blocked = blocked_cache[media_id]
                 else:
-                    year = int(splitted[0])
-            else:
-                year = int(year)
-
-            torrents_found = 0
-
-            try:
-                logger.log(
-                    "BACKGROUND_SCRAPER",
-                    f"Scraping {media_type}: {title} ({year}) - {media_id}",
-                )
-
-                if media_type == "series":
-                    torrents_found = await self._scrape_series_episodes(
-                        media_id, title, year, year_end, media_item.get("videos", [])
+                    blocked = await self._is_discovery_candidate_blocked(
+                        media_id=media_id,
+                        media_type=media_type,
+                        now=now,
+                        success_cutoff=success_cutoff,
                     )
-                else:
-                    torrents_found = await self._scrape_movie(media_id, title, year)
+                    blocked_cache[media_id] = blocked
+                if blocked:
+                    continue
 
-                self.stats.total_torrents_found += torrents_found
+                batch.append(normalized)
+                discovered += 1
 
-                increment_attempt = 1 if torrents_found == 0 else 0
-            except Exception as e:
-                self.stats.errors += 1
-                increment_attempt = 1
+                if len(batch) >= 200:
+                    await self._upsert_discovered_items(batch)
+                    batch.clear()
 
-                logger.error(f"Error scraping {media_type} {media_id}: {e}")
+                if discovered >= max_discovery_items:
+                    break
 
-            await database.execute(
-                """
-                INSERT INTO background_scraper_state 
-                (media_id, media_type, title, year, scraped_at, total_torrents_found, 
-                scrape_failed_attempts)
-                VALUES (:media_id, :media_type, :title, :year, :scraped_at, 
-                        :torrents_found, :increment_attempt)
-                ON CONFLICT (media_id) DO UPDATE SET
-                    scraped_at = :scraped_at,
-                    total_torrents_found = :torrents_found,
-                    scrape_failed_attempts = background_scraper_state.scrape_failed_attempts + :increment_attempt
-                """,
-                {
-                    "media_id": media_id,
-                    "media_type": media_type,
-                    "title": title,
-                    "year": year,
-                    "scraped_at": time.time(),
-                    "torrents_found": torrents_found,
-                    "increment_attempt": increment_attempt,
-                },
-            )
+        if batch:
+            await self._upsert_discovered_items(batch)
 
-            # Add to first_searches table so Stremio won't re-scrape this item
-            # This marks the media as "already searched" to avoid duplicate scraping
-            if torrents_found > 0:
-                await database.execute(
-                    f"""
-                    INSERT {"OR IGNORE " if settings.DATABASE_TYPE == "sqlite" else ""}
-                    INTO first_searches 
-                    VALUES (:media_id, :timestamp)
-                    {" ON CONFLICT DO NOTHING" if settings.DATABASE_TYPE == "postgresql" else ""}
-                    """,
-                    {"media_id": media_id, "timestamp": time.time()},
-                )
+        return discovered
 
-            logger.log(
-                "BACKGROUND_SCRAPER",
-                f"✅ Successfully scraped {media_id} - {torrents_found} torrents found",
-            )
-
-            self.stats.total_processed += 1
-
-    async def _scrape_movie(self, media_id: str, title: str, year: int):
-        metadata, aliases = await self.metadata_scraper.fetch_aliases_with_metadata(
-            "movie", media_id, title, year
+    async def _is_discovery_candidate_blocked(
+        self, media_id: str, media_type: str, now: float, success_cutoff: float
+    ) -> bool:
+        blocked = await database.fetch_val(
+            """
+            SELECT 1
+            FROM background_scraper_items
+            WHERE media_id = :media_id
+              AND media_type = :media_type
+              AND (
+                    (next_retry_at IS NOT NULL AND next_retry_at > :now)
+                    OR (last_success_at IS NOT NULL AND last_success_at > :success_cutoff)
+                  )
+            LIMIT 1
+            """,
+            {
+                "media_id": media_id,
+                "media_type": media_type,
+                "now": now,
+                "success_cutoff": success_cutoff,
+            },
         )
+        return bool(blocked)
+
+    def _normalize_media_item(
+        self, media_item: dict, media_type: str, now: float, current_year: int
+    ):
+        media_id = media_item.get("imdb_id") or media_item.get("id")
+        title = media_item.get("name") or media_item.get("title")
+        if (
+            type(media_id) is not str
+            or not media_id
+            or type(title) is not str
+            or not title
+        ):
+            return None
+
+        year_source = media_item.get("year") or media_item.get("releaseInfo")
+        year, year_end = parse_year_range(year_source)
+        if year is None:
+            return None
+
+        return {
+            "media_id": media_id,
+            "media_type": media_type,
+            "title": title,
+            "year": year,
+            "year_end": year_end,
+            "priority_score": self._calculate_priority(
+                media_item, media_type, year, current_year
+            ),
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    def _calculate_priority(
+        self, media_item: dict, media_type: str, year: int, current_year: int
+    ) -> float:
+        rating_raw = media_item.get("imdbRating") or 0
+        try:
+            if type(rating_raw) is bool:
+                raise TypeError
+            rating = float(rating_raw)
+            if not math.isfinite(rating) or not 0 <= rating <= 10:
+                rating = 0.0
+        except (TypeError, ValueError):
+            rating = 0.0
+
+        votes_raw = media_item.get("imdbVotes") or 0
+        if isinstance(votes_raw, str):
+            votes_raw = votes_raw.replace(",", "")
+        try:
+            votes = int(votes_raw) if type(votes_raw) in (int, str) else 0
+            votes = max(votes, 0)
+        except (TypeError, ValueError, OverflowError):
+            votes = 0
+
+        recency_bonus = max(0.0, 12.0 - (current_year - year))
+        votes_bonus = 4.0 if votes >= 200000 else votes / 50000.0
+        type_bonus = 1.5 if media_type == "series" else 0.0
+
+        return round((rating * 10.0) + recency_bonus + votes_bonus + type_bonus, 4)
+
+    async def _upsert_discovered_items(self, batch: list[dict]):
+        query = """
+        INSERT INTO background_scraper_items
+        (media_id, media_type, title, year, year_end, priority_score, status,
+         consecutive_failures, created_at, updated_at)
+        VALUES
+        (:media_id, :media_type, :title, :year, :year_end, :priority_score, 'discovered',
+         0, :created_at, :updated_at)
+        ON CONFLICT (media_id) DO UPDATE SET
+            media_type = excluded.media_type,
+            title = excluded.title,
+            year = excluded.year,
+            year_end = excluded.year_end,
+            priority_score = CASE
+                WHEN excluded.priority_score > background_scraper_items.priority_score
+                THEN excluded.priority_score
+                ELSE background_scraper_items.priority_score
+            END,
+            updated_at = excluded.updated_at
+        """
+        await database.execute_many(query, batch)
+
+    async def _plan_items(self, media_type: str, limit: int):
+        if limit <= 0:
+            return []
+
+        now = time.time()
+        success_cutoff = now - settings.BACKGROUND_SCRAPER_SUCCESS_TTL
+        demand_cutoff = now - settings.BACKGROUND_SCRAPER_DEMAND_LOOKBACK
+        max_retries = self._max_retries_for_query()
+        demand_enabled = 1 if settings.BACKGROUND_SCRAPER_ENABLE_DEMAND_PRIORITY else 0
+        min_priority_score = max(0.0, settings.BACKGROUND_SCRAPER_MIN_PRIORITY_SCORE)
+
+        rows = await database.fetch_all(
+            """
+            WITH demand_ids AS (
+                SELECT DISTINCT md.media_id
+                FROM media_demand md
+                WHERE :demand_enabled = 1
+                  AND md.last_seen_at >= :demand_cutoff
+            ),
+            demand_matches AS (
+                SELECT DISTINCT i.media_id
+                FROM background_scraper_items i
+                JOIN demand_ids d
+                  ON d.media_id = i.media_id
+                  OR d.media_id LIKE i.media_id || :series_media_id_like_suffix
+            )
+            SELECT i.media_id, i.media_type, i.title, i.year, i.year_end, i.priority_score,
+                   i.consecutive_failures, i.status,
+                   CASE WHEN d.media_id IS NOT NULL THEN 100.0 ELSE 0.0 END AS demand_boost
+            FROM background_scraper_items i
+            LEFT JOIN demand_matches d ON d.media_id = i.media_id
+            WHERE i.media_type = :media_type
+              AND (i.next_retry_at IS NULL OR i.next_retry_at <= :now)
+              AND (i.last_success_at IS NULL OR i.last_success_at <= :success_cutoff)
+              AND (i.status != 'dead' OR i.consecutive_failures < :max_retries)
+              AND (
+                    i.priority_score >= :min_priority_score
+                    OR d.media_id IS NOT NULL
+                    OR i.consecutive_failures > 0
+                  )
+            ORDER BY
+              (i.priority_score + CASE WHEN d.media_id IS NOT NULL THEN 100.0 ELSE 0.0 END) DESC,
+              COALESCE(i.last_scraped_at, 0) ASC
+            LIMIT :limit
+            """,
+            {
+                "media_type": media_type,
+                "now": now,
+                "success_cutoff": success_cutoff,
+                "demand_cutoff": demand_cutoff,
+                "max_retries": max_retries,
+                "limit": limit,
+                "demand_enabled": demand_enabled,
+                "min_priority_score": min_priority_score,
+                "series_media_id_like_suffix": ":%",
+            },
+        )
+
+        if rows:
+            await database.execute_many(
+                """
+                UPDATE background_scraper_items
+                SET status = 'running', updated_at = :updated_at
+                WHERE media_id = :media_id
+                """,
+                [{"media_id": row["media_id"], "updated_at": now} for row in rows],
+            )
+
+        return [dict(row) for row in rows]
+
+    async def _scrape_single_media(self, item: dict, deadline: float | None):
+        item_failures = int(item["consecutive_failures"])
+        if not self.is_running:
+            await self._defer_item(item["media_id"], item_failures)
+            return
+
+        await self._wait_if_paused()
+        if not self.is_running:
+            await self._defer_item(item["media_id"], item_failures)
+            return
+
+        if deadline is not None and time.time() > deadline:
+            await self._defer_item(item["media_id"], item_failures)
+            return
+
+        media_id = item["media_id"]
+        media_type = item["media_type"]
+        torrents_found = 0
+        success = False
+        error_message = None
+
+        try:
+            if media_type == "movie":
+                torrents_found = await self._scrape_movie(item)
+            else:
+                torrents_found = await self._scrape_series(item, deadline)
+            success = torrents_found > 0
+        except Exception as e:
+            error_message = str(e)
+            self.stats.errors += 1
+            logger.error(
+                f"Background scrape failed for {media_type} {media_id}: {error_message}"
+            )
+
+        await self._update_item_state(item, success, torrents_found, error_message)
+
+        if success:
+            self.stats.total_success += 1
+        else:
+            self.stats.total_failed += 1
+        self.stats.total_processed += 1
+        self.stats.total_torrents_found += torrents_found
+
+    async def _scrape_movie(self, item: dict) -> int:
+        media_id = item["media_id"]
+        title = item["title"]
+        year = item["year"]
+
+        metadata, aliases = await self.metadata_scraper.fetch_aliases_with_metadata(
+            "movie", media_id, title, year, id=media_id
+        )
+        if metadata is None:
+            return 0
 
         manager = TorrentManager(
-            debrid_service="torrent",
-            debrid_api_key="",
-            ip="127.0.0.1",
             media_type="movie",
             media_full_id=media_id,
             media_only_id=media_id,
@@ -345,67 +1352,438 @@ class BackgroundScraperWorker:
             episode=None,
             aliases=aliases,
             remove_adult_content=settings.REMOVE_ADULT_CONTENT,
-            context="background",
         )
 
-        await manager.scrape_torrents(self.current_session)
-        return len(manager.torrents)
+        await manager.scrape_torrents(ScrapeContext.BACKGROUND)
+        torrents_found = len(manager.torrents)
+        if torrents_found > 0:
+            await mark_scope_scraped(media_id)
+        return torrents_found
 
-    async def _scrape_series_episodes(
-        self, media_id: str, title: str, year: int, year_end: int, episodes: list
-    ):
+    async def _scrape_series(self, item: dict, deadline: float | None) -> int:
+        media_id = item["media_id"]
+        title = item["title"]
+        year = item["year"]
+        year_end = item["year_end"]
         total_torrents = 0
 
         series_media_id = f"{media_id}:1:1"
-
         metadata, aliases = await self.metadata_scraper.fetch_aliases_with_metadata(
-            "series", series_media_id, title, year, year_end
+            "series", series_media_id, title, year, year_end, id=media_id
         )
+        if metadata is None:
+            return 0
+
+        episodes = await self._get_or_discover_episodes(media_id)
+        if not episodes:
+            return 0
 
         for episode in episodes:
+            if not self.is_running:
+                break
+            await self._wait_if_paused()
+            if not self.is_running:
+                break
+
+            if deadline is not None and time.time() > deadline:
+                break
+
+            episode_media_id = episode["episode_media_id"]
             season = episode["season"]
-            episode_number = episode.get("episode") or episode.get("number")
-            episode_media_id = f"{media_id}:{season}:{episode_number}"
+            episode_number = episode["episode"]
+            episode_torrents = 0
+            success = False
+            error_message = None
 
-            manager = TorrentManager(
-                debrid_service="torrent",
-                debrid_api_key="",
-                ip="127.0.0.1",
-                media_type="series",
-                media_full_id=episode_media_id,
-                media_only_id=media_id,
-                title=metadata["title"],
-                year=metadata["year"],
-                year_end=metadata["year_end"],
-                season=season,
-                episode=episode_number,
-                aliases=aliases,
-                remove_adult_content=settings.REMOVE_ADULT_CONTENT,
-                context="background",
-            )
-
-            await manager.scrape_torrents(self.current_session)
-            episode_torrents = len(manager.torrents)
-            total_torrents += episode_torrents
-
-            # Mark this specific episode as searched to avoid re-scraping
-            if episode_torrents > 0:
-                await database.execute(
-                    f"""
-                    INSERT {"OR IGNORE " if settings.DATABASE_TYPE == "sqlite" else ""}
-                    INTO first_searches
-                    VALUES (:media_id, :timestamp)
-                    {" ON CONFLICT DO NOTHING" if settings.DATABASE_TYPE == "postgresql" else ""}
-                    """,
-                    {"media_id": episode_media_id, "timestamp": time.time()},
+            try:
+                manager = TorrentManager(
+                    media_type="series",
+                    media_full_id=episode_media_id,
+                    media_only_id=media_id,
+                    title=metadata["title"],
+                    year=metadata["year"],
+                    year_end=metadata["year_end"],
+                    season=season,
+                    episode=episode_number,
+                    aliases=aliases,
+                    remove_adult_content=settings.REMOVE_ADULT_CONTENT,
+                )
+                await manager.scrape_torrents(ScrapeContext.BACKGROUND)
+                episode_torrents = len(manager.torrents)
+                success = episode_torrents > 0
+            except Exception as e:
+                error_message = str(e)
+                logger.error(
+                    f"Background scrape failed for episode {episode_media_id}: {error_message}"
                 )
 
-            logger.log(
-                "BACKGROUND_SCRAPER",
-                f"✅ Successfully scraped {episode_media_id} - {episode_torrents} torrents found",
+            await self._update_episode_state(
+                episode, success, episode_torrents, error_message
             )
 
+            if success:
+                await mark_scope_scraped(episode_media_id)
+            total_torrents += episode_torrents
+
         return total_torrents
+
+    async def _get_or_discover_episodes(self, series_id: str):
+        now = time.time()
+        has_existing_episodes = await database.fetch_val(
+            """
+            SELECT 1
+            FROM background_scraper_episodes
+            WHERE series_id = :series_id
+              AND season >= 1
+              AND episode >= 1
+            LIMIT 1
+            """,
+            {"series_id": series_id},
+        )
+        episode_refresh_ttl = settings.BACKGROUND_SCRAPER_EPISODE_REFRESH_TTL
+        should_refresh_episodes = has_existing_episodes is None
+
+        if has_existing_episodes and episode_refresh_ttl > 0:
+            last_episode_refresh = await database.fetch_val(
+                """
+                SELECT MAX(updated_at)
+                FROM background_scraper_episodes
+                WHERE series_id = :series_id
+                  AND season >= 1
+                  AND episode >= 1
+                """,
+                {"series_id": series_id},
+            )
+            if (
+                last_episode_refresh is None
+                or (now - float(last_episode_refresh)) >= episode_refresh_ttl
+            ):
+                should_refresh_episodes = True
+
+        if should_refresh_episodes:
+            session = await http_client_manager.get_session()
+            async with CinemataClient(session=session) as cinemata_client:
+                discovered = await cinemata_client.fetch_series_episodes(series_id)
+
+            if discovered:
+                rows = []
+                for entry in discovered:
+                    season = entry["season"]
+                    episode = entry["episode"]
+                    episode_media_id = f"{series_id}:{season}:{episode}"
+                    rows.append(
+                        {
+                            "episode_media_id": episode_media_id,
+                            "series_id": series_id,
+                            "season": season,
+                            "episode": episode,
+                            "created_at": now,
+                            "updated_at": now,
+                        }
+                    )
+
+                await database.execute_many(
+                    """
+                    INSERT INTO background_scraper_episodes
+                    (episode_media_id, series_id, season, episode, status, created_at, updated_at)
+                    VALUES
+                    (:episode_media_id, :series_id, :season, :episode, 'discovered', :created_at, :updated_at)
+                    ON CONFLICT (episode_media_id) DO UPDATE SET
+                        season = excluded.season,
+                        episode = excluded.episode,
+                        updated_at = excluded.updated_at
+                    """,
+                    rows,
+                )
+
+        success_cutoff = now - settings.BACKGROUND_SCRAPER_SUCCESS_TTL
+        max_retries = self._max_retries_for_query()
+        configured_max_episodes = (
+            settings.BACKGROUND_SCRAPER_MAX_EPISODES_PER_SERIES_PER_RUN
+        )
+        max_episodes = (
+            configured_max_episodes
+            if configured_max_episodes and configured_max_episodes > 0
+            else 10000
+        )
+
+        rows = await database.fetch_all(
+            """
+            SELECT episode_media_id, series_id, season, episode, status, consecutive_failures
+            FROM background_scraper_episodes
+            WHERE series_id = :series_id
+              AND season >= 1
+              AND episode >= 1
+              AND (next_retry_at IS NULL OR next_retry_at <= :now)
+              AND (last_success_at IS NULL OR last_success_at <= :success_cutoff)
+              AND (status != 'dead' OR consecutive_failures < :max_retries)
+            ORDER BY season DESC, episode DESC
+            LIMIT :limit
+            """,
+            {
+                "series_id": series_id,
+                "now": now,
+                "success_cutoff": success_cutoff,
+                "max_retries": max_retries,
+                "limit": max_episodes,
+            },
+        )
+        return [dict(row) for row in rows]
+
+    async def _update_item_state(
+        self, item: dict, success: bool, torrents_found: int, error_message: str | None
+    ):
+        media_id = item["media_id"]
+        current_failures = int(item["consecutive_failures"])
+        state = self._compute_next_state(success, current_failures)
+
+        await self._persist_entity_state(
+            table_name="background_scraper_items",
+            key_name="media_id",
+            key_value=media_id,
+            state=state,
+            torrents_found=torrents_found,
+        )
+        item["consecutive_failures"] = state["consecutive_failures"]
+        if not success:
+            await self._decay_item_priority_on_miss(media_id)
+
+        if not success and error_message:
+            self.last_error = error_message
+
+    async def _update_episode_state(
+        self,
+        episode: dict,
+        success: bool,
+        torrents_found: int,
+        error_message: str | None,
+    ):
+        episode_media_id = episode["episode_media_id"]
+        current_failures = int(episode["consecutive_failures"])
+        state = self._compute_next_state(success, current_failures)
+
+        await self._persist_entity_state(
+            table_name="background_scraper_episodes",
+            key_name="episode_media_id",
+            key_value=episode_media_id,
+            state=state,
+            torrents_found=torrents_found,
+        )
+        episode["consecutive_failures"] = state["consecutive_failures"]
+
+        if not success and error_message:
+            self.last_error = error_message
+
+    def _compute_next_state(self, success: bool, current_failures: int) -> dict:
+        now = time.time()
+
+        if success:
+            return {
+                "status": "success",
+                "consecutive_failures": 0,
+                "last_scraped_at": now,
+                "last_success_at": now,
+                "last_failure_at": None,
+                "next_retry_at": now + settings.BACKGROUND_SCRAPER_SUCCESS_TTL,
+                "updated_at": now,
+            }
+
+        failures = current_failures + 1
+        blocked = self._is_retry_limit_reached(failures)
+        return {
+            "status": "dead" if blocked else "failed",
+            "consecutive_failures": failures,
+            "last_scraped_at": now,
+            "last_success_at": None,
+            "last_failure_at": now,
+            "next_retry_at": None if blocked else now + self._compute_backoff(failures),
+            "updated_at": now,
+        }
+
+    async def _persist_entity_state(
+        self,
+        table_name: str,
+        key_name: str,
+        key_value: str,
+        state: dict,
+        torrents_found: int,
+    ):
+        await database.execute(
+            f"""
+            UPDATE {table_name}
+            SET status = :status,
+                consecutive_failures = :consecutive_failures,
+                last_scraped_at = :last_scraped_at,
+                last_success_at = COALESCE(:last_success_at, last_success_at),
+                last_failure_at = COALESCE(:last_failure_at, last_failure_at),
+                next_retry_at = :next_retry_at,
+                total_torrents_found =
+                    COALESCE(total_torrents_found, 0) + :total_torrents_found,
+                updated_at = :updated_at
+            WHERE {key_name} = :entity_id
+            """,
+            {
+                "entity_id": key_value,
+                "status": state["status"],
+                "consecutive_failures": state["consecutive_failures"],
+                "last_scraped_at": state["last_scraped_at"],
+                "last_success_at": state["last_success_at"],
+                "last_failure_at": state["last_failure_at"],
+                "next_retry_at": state["next_retry_at"],
+                "total_torrents_found": torrents_found,
+                "updated_at": state["updated_at"],
+            },
+        )
+
+    async def _defer_items(self, items: list[tuple[str, int]]):
+        if not items:
+            return
+
+        now = time.time()
+        defer_cooldown = max(0, settings.BACKGROUND_SCRAPER_DEFER_COOLDOWN)
+        next_retry_at = now + defer_cooldown
+        await database.execute_many(
+            """
+            UPDATE background_scraper_items
+            SET status = 'deferred',
+                consecutive_failures = :consecutive_failures,
+                next_retry_at = :next_retry_at,
+                updated_at = :updated_at
+            WHERE media_id = :media_id
+              AND status = 'running'
+            """,
+            [
+                {
+                    "media_id": media_id,
+                    "consecutive_failures": current_failures,
+                    "next_retry_at": next_retry_at,
+                    "updated_at": now,
+                }
+                for media_id, current_failures in items
+            ],
+        )
+
+    async def _defer_item(self, media_id: str, current_failures: int):
+        await self._defer_items([(media_id, current_failures)])
+
+    async def _reset_running_items(self):
+        now = time.time()
+        await database.execute(
+            """
+            UPDATE background_scraper_items
+            SET status = 'discovered',
+                next_retry_at = COALESCE(next_retry_at, :next_retry_at),
+                updated_at = :updated_at
+            WHERE status = 'running'
+            """,
+            {"next_retry_at": now, "updated_at": now},
+        )
+
+    async def _decay_item_priority_on_miss(self, media_id: str):
+        decay = settings.BACKGROUND_SCRAPER_PRIORITY_DECAY_ON_MISS
+        if decay <= 0 or decay >= 1:
+            return
+
+        await database.execute(
+            """
+            UPDATE background_scraper_items
+            SET priority_score = priority_score * :decay
+            WHERE media_id = :media_id
+            """,
+            {"media_id": media_id, "decay": decay},
+        )
+
+    async def requeue_dead_items(self):
+        now = time.time()
+        async with database.transaction():
+            dead_items = int(
+                await database.fetch_val(
+                    """
+                    SELECT COUNT(*) FROM background_scraper_items
+                    WHERE status = 'dead'
+                    """
+                )
+            )
+            dead_episodes = int(
+                await database.fetch_val(
+                    """
+                    SELECT COUNT(*) FROM background_scraper_episodes
+                    WHERE status = 'dead'
+                    """
+                )
+            )
+
+            await database.execute(
+                """
+                UPDATE background_scraper_items
+                SET status = 'discovered',
+                    consecutive_failures = 0,
+                    next_retry_at = :next_retry_at,
+                    updated_at = :updated_at
+                WHERE status = 'dead'
+                """,
+                {"next_retry_at": now, "updated_at": now},
+            )
+            await database.execute(
+                """
+                UPDATE background_scraper_episodes
+                SET status = 'discovered',
+                    consecutive_failures = 0,
+                    next_retry_at = :next_retry_at,
+                    updated_at = :updated_at
+                WHERE status = 'dead'
+                """,
+                {"next_retry_at": now, "updated_at": now},
+            )
+
+        return {"items": dead_items, "episodes": dead_episodes}
+
+    def _compute_health_status(
+        self,
+        fail_rate_24h: float,
+        processed_24h: int,
+        oldest_queue_age_s: float,
+        total_queue: int,
+    ) -> dict:
+        reasons = []
+        alert_fail_rate = settings.BACKGROUND_SCRAPER_ALERT_FAIL_RATE
+        alert_queue_age = settings.BACKGROUND_SCRAPER_ALERT_QUEUE_AGE
+
+        if (
+            processed_24h >= 20
+            and alert_fail_rate > 0
+            and fail_rate_24h >= alert_fail_rate
+        ):
+            reasons.append("high_fail_rate_24h")
+        if (
+            total_queue > 0
+            and alert_queue_age > 0
+            and oldest_queue_age_s >= alert_queue_age
+        ):
+            reasons.append("old_queue_items")
+
+        return {
+            "status": "degraded" if reasons else "healthy",
+            "reasons": reasons,
+        }
+
+    def _compute_backoff(self, failures: int) -> float:
+        base = max(1, settings.BACKGROUND_SCRAPER_FAILURE_BASE_BACKOFF)
+        max_backoff = max(base, settings.BACKGROUND_SCRAPER_FAILURE_MAX_BACKOFF)
+        exponent = max(0, failures - 1)
+        return min(max_backoff, base * math.pow(2, exponent))
+
+    def _max_retries_for_query(self) -> int:
+        configured = settings.BACKGROUND_SCRAPER_MAX_RETRIES
+        if configured is None or configured < 0:
+            return 1000000
+        return configured
+
+    def _is_retry_limit_reached(self, failures: int) -> bool:
+        configured = settings.BACKGROUND_SCRAPER_MAX_RETRIES
+        if configured is None or configured < 0:
+            return False
+        return failures >= configured
 
 
 background_scraper = BackgroundScraperWorker()

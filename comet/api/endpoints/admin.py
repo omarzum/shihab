@@ -1,56 +1,76 @@
+import asyncio
 import secrets
 import time
-import uuid
 
 import orjson
 from fastapi import APIRouter, Cookie, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from comet.core.logger import log_capture
+from comet.background_scraper.worker import background_scraper
+from comet.core.logger import log_capture, logger
 from comet.core.models import database, settings
 from comet.services.bandwidth import bandwidth_monitor
 from comet.utils.formatting import format_bytes
+from comet.utils.signed_session import (
+    derive_session_secret,
+    encode_signed_session,
+    verify_signed_session,
+)
+from comet.utils.update import UpdateManager
 
 router = APIRouter()
 templates = Jinja2Templates("comet/templates")
+background_scraper_start_lock = asyncio.Lock()
+ADMIN_SESSION_COOKIE = "admin_session"
+ADMIN_SESSION_TTL = settings.ADMIN_DASHBOARD_SESSION_TTL
+ADMIN_SESSION_SECRET = derive_session_secret(
+    settings.ADMIN_DASHBOARD_PASSWORD,
+    "admin-dashboard",
+)
 
 
-async def create_admin_session():
-    session_id = str(uuid.uuid4())
-    created_at = time.time()
-    expires_at = created_at + 86400  # 24 hours
-
-    await database.execute(
-        """
-            INSERT INTO admin_sessions (session_id, created_at, expires_at)
-            VALUES (:session_id, :created_at, :expires_at)
-        """,
-        {"session_id": session_id, "created_at": created_at, "expires_at": expires_at},
-    )
-    return session_id
+def _decode_cached_metrics(value):
+    try:
+        payload = orjson.loads(value)
+    except (TypeError, orjson.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
-async def verify_admin_session(admin_session: str = Cookie(None)):
-    if not admin_session:
-        return False
+def _handle_background_scraper_task_done(task: asyncio.Task):
+    if task.cancelled():
+        return
 
-    current_time = time.time()
+    try:
+        error = task.exception()
+    except asyncio.CancelledError:
+        return
+    except Exception as e:
+        background_scraper.last_error = str(e)
+        logger.error(f"Background scraper task completion handling failed: {e}")
+        return
 
-    # Check if session exists and is valid
-    session = await database.fetch_one(
-        """
-            SELECT session_id FROM admin_sessions 
-            WHERE session_id = :session_id AND expires_at > :current_time
-        """,
-        {"session_id": admin_session, "current_time": current_time},
-    )
+    if error:
+        background_scraper.last_error = str(error)
+        logger.error(f"Background scraper task failed: {error}")
 
-    return session is not None
+    if background_scraper.task is task:
+        background_scraper.task = None
 
 
-async def require_admin_auth(admin_session: str = Cookie(None)):
-    if not await verify_admin_session(admin_session):
+def create_admin_session():
+    return encode_signed_session(secret=ADMIN_SESSION_SECRET, ttl=ADMIN_SESSION_TTL)
+
+
+def verify_admin_session(admin_session: str | None):
+    return verify_signed_session(token=admin_session, secret=ADMIN_SESSION_SECRET)
+
+
+def require_admin_auth(
+    admin_session: str | None = Cookie(None, description="Admin session token"),
+):
+    if not verify_admin_session(admin_session):
         raise HTTPException(status_code=401, detail="Authentication required")
 
 
@@ -61,11 +81,12 @@ async def require_admin_auth(admin_session: str = Cookie(None)):
     description="Renders the admin login page.",
 )
 async def admin_root(
-    request: Request, admin_session: str = Cookie(None, description="Admin session ID")
+    request: Request,
+    admin_session: str = Cookie(None, description="Admin session token"),
 ):
-    if await verify_admin_session(admin_session):
+    if verify_admin_session(admin_session):
         return RedirectResponse("/admin/dashboard")
-    return templates.TemplateResponse("admin_login.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="admin_login.html")
 
 
 @router.post(
@@ -81,20 +102,35 @@ async def admin_login(
 
     if not is_correct:
         return templates.TemplateResponse(
-            "admin_login.html", {"request": request, "error": "Invalid password"}
+            request=request,
+            name="admin_login.html",
+            context={"error": "Invalid password"},
         )
 
-    session_id = await create_admin_session()
+    session_token = create_admin_session()
     response = RedirectResponse("/admin/dashboard", status_code=303)
     response.set_cookie(
-        key="admin_session",
-        value=session_id,
+        key=ADMIN_SESSION_COOKIE,
+        value=session_token,
         httponly=True,
-        secure=False,
+        secure=request.url.scheme == "https",
         samesite="lax",
-        max_age=86400,
+        max_age=ADMIN_SESSION_TTL,
     )
     return response
+
+
+@router.get(
+    "/admin/api/update-check",
+    tags=["Admin"],
+    summary="Check for Updates",
+    description="Checks if a new version of Comet is available.",
+)
+async def update_check(
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    return await UpdateManager.check_for_updates()
 
 
 @router.get(
@@ -104,11 +140,21 @@ async def admin_login(
     description="Renders the admin dashboard.",
 )
 async def admin_dashboard(
-    request: Request, admin_session: str = Cookie(None, description="Admin session ID")
+    request: Request,
+    admin_session: str = Cookie(None, description="Admin session token"),
 ):
     try:
-        await require_admin_auth(admin_session)
-        return templates.TemplateResponse("admin_dashboard.html", {"request": request})
+        require_admin_auth(admin_session)
+        return templates.TemplateResponse(
+            request=request,
+            name="admin_dashboard.html",
+            context={
+                "version_info": UpdateManager.get_version_info(),
+                "background_scraper_interval": max(
+                    1, settings.BACKGROUND_SCRAPER_INTERVAL
+                ),
+            },
+        )
     except HTTPException:
         return RedirectResponse("/admin", status_code=303)
 
@@ -119,18 +165,9 @@ async def admin_dashboard(
     summary="Admin Logout",
     description="Logs out the admin user.",
 )
-async def admin_logout(
-    admin_session: str = Cookie(None, description="Admin session ID"),
-):
-    if admin_session:
-        # Remove session from database
-        await database.execute(
-            "DELETE FROM admin_sessions WHERE session_id = :session_id",
-            {"session_id": admin_session},
-        )
-
+async def admin_logout():
     response = RedirectResponse("/admin", status_code=303)
-    response.delete_cookie("admin_session")
+    response.delete_cookie(ADMIN_SESSION_COOKIE)
     return response
 
 
@@ -141,15 +178,16 @@ async def admin_logout(
     description="Returns a list of active connections and bandwidth usage.",
 )
 async def admin_api_connections(
-    admin_session: str = Cookie(None, description="Admin session ID"),
+    admin_session: str = Cookie(None, description="Admin session token"),
 ):
-    await require_admin_auth(admin_session)
+    require_admin_auth(admin_session)
     rows = await database.fetch_all(
-        "SELECT id, ip, content, timestamp FROM active_connections ORDER BY timestamp DESC"
+        "SELECT id, ip, content, started_at AS timestamp FROM active_connections ORDER BY started_at DESC"
     )
 
     bandwidth_metrics = bandwidth_monitor.get_all_active_connections()
     global_stats = bandwidth_monitor.get_global_stats()
+    current_time = time.time()
 
     connections = []
     for row in rows:
@@ -159,7 +197,7 @@ async def admin_api_connections(
             "ip": row["ip"],
             "content": row["content"],
             "timestamp": row["timestamp"],
-            "duration": time.time() - row["timestamp"],
+            "duration": current_time - row["timestamp"],
             "formatted_time": time.strftime(
                 "%Y-%m-%d %H:%M:%S", time.localtime(row["timestamp"])
             ),
@@ -230,9 +268,10 @@ async def admin_api_connections(
     description="Returns a list of recent application logs.",
 )
 async def admin_api_logs(
-    admin_session: str = Cookie(None, description="Admin session ID"), since: float = 0
+    admin_session: str = Cookie(None, description="Admin session token"),
+    since: float = 0,
 ):
-    await require_admin_auth(admin_session)
+    require_admin_auth(admin_session)
 
     # Get logs since the specified timestamp
     all_logs = log_capture.get_logs()
@@ -250,22 +289,26 @@ async def admin_api_logs(
     description="Returns application metrics including torrents, searches, and cache stats.",
 )
 async def admin_api_metrics(
-    admin_session: str = Cookie(None, description="Admin session ID"),
+    admin_session: str = Cookie(None, description="Admin session token"),
 ):
     if not settings.PUBLIC_METRICS_API:
-        await require_admin_auth(admin_session)
+        require_admin_auth(admin_session)
 
     current_time = time.time()
 
     # Try to get from cache
     cached_metrics = await database.fetch_one(
-        "SELECT data, timestamp FROM metrics_cache WHERE id = 1"
+        "SELECT payload_json, refreshed_at FROM metrics_cache WHERE id = 1"
     )
-    if (
-        cached_metrics
-        and cached_metrics["timestamp"] + settings.METRICS_CACHE_TTL > current_time
-    ):
-        return JSONResponse(orjson.loads(cached_metrics["data"]))
+    if cached_metrics:
+        refreshed_at = cached_metrics["refreshed_at"]
+        if (
+            isinstance(refreshed_at, (int, float))
+            and refreshed_at + settings.METRICS_CACHE_TTL > current_time
+        ):
+            cached_payload = _decode_cached_metrics(cached_metrics["payload_json"])
+            if cached_payload is not None:
+                return JSONResponse(cached_payload)
 
     # 📊 TORRENTS METRICS
     total_torrents = await database.fetch_val("SELECT COUNT(*) FROM torrents")
@@ -328,25 +371,27 @@ async def admin_api_metrics(
     """)
 
     # 🔍 SEARCH METRICS
-    total_unique_searches = await database.fetch_val(
-        "SELECT COUNT(*) FROM first_searches"
+    search_metrics = await database.fetch_one(
+        """
+        SELECT
+            COUNT(*) AS total_unique_searches,
+            COALESCE(SUM(CASE WHEN first_seen_at >= :time_24h THEN 1 ELSE 0 END), 0) AS searches_24h,
+            COALESCE(SUM(CASE WHEN first_seen_at >= :time_7d THEN 1 ELSE 0 END), 0) AS searches_7d,
+            COALESCE(SUM(CASE WHEN first_seen_at >= :time_30d THEN 1 ELSE 0 END), 0) AS searches_30d
+        FROM media_demand
+        """,
+        {
+            "time_24h": current_time - 86400,
+            "time_7d": current_time - 604800,
+            "time_30d": current_time - 2592000,
+        },
     )
-
-    # Recent searches (last 24h, 7d, 30d)
-    searches_24h = await database.fetch_val(
-        "SELECT COUNT(*) FROM first_searches WHERE timestamp >= :time_24h",
-        {"time_24h": current_time - 86400},
+    total_unique_searches = (
+        search_metrics["total_unique_searches"] if search_metrics else 0
     )
-
-    searches_7d = await database.fetch_val(
-        "SELECT COUNT(*) FROM first_searches WHERE timestamp >= :time_7d",
-        {"time_7d": current_time - 604800},
-    )
-
-    searches_30d = await database.fetch_val(
-        "SELECT COUNT(*) FROM first_searches WHERE timestamp >= :time_30d",
-        {"time_30d": current_time - 2592000},
-    )
+    searches_24h = search_metrics["searches_24h"] if search_metrics else 0
+    searches_7d = search_metrics["searches_7d"] if search_metrics else 0
+    searches_30d = search_metrics["searches_30d"] if search_metrics else 0
 
     # 🔧 SCRAPER METRICS
     active_locks = await database.fetch_val(
@@ -364,11 +409,11 @@ async def admin_api_metrics(
         """
         SELECT debrid_service, COUNT(*) as count, AVG(size) as avg_size, SUM(size) as total_size
         FROM debrid_availability 
-        WHERE timestamp + :cache_ttl >= :current_time
+        WHERE updated_at >= :min_timestamp
         GROUP BY debrid_service 
         ORDER BY count DESC
     """,
-        {"cache_ttl": settings.DEBRID_CACHE_TTL, "current_time": current_time},
+        {"min_timestamp": current_time - settings.DEBRID_CACHE_TTL},
     )
 
     # Process quality stats
@@ -437,11 +482,193 @@ async def admin_api_metrics(
     # Save to cache
     await database.execute(
         """
-            INSERT INTO metrics_cache (id, data, timestamp) 
-            VALUES (1, :data, :timestamp)
-            ON CONFLICT(id) DO UPDATE SET data = :data, timestamp = :timestamp
+            INSERT INTO metrics_cache (id, payload_json, refreshed_at) 
+            VALUES (1, :payload_json, :refreshed_at)
+            ON CONFLICT(id) DO UPDATE SET
+                payload_json = :payload_json,
+                refreshed_at = :refreshed_at
         """,
-        {"data": orjson.dumps(metrics_data).decode("utf-8"), "timestamp": current_time},
+        {
+            "payload_json": orjson.dumps(metrics_data).decode("utf-8"),
+            "refreshed_at": current_time,
+        },
     )
 
     return JSONResponse(metrics_data)
+
+
+@router.get(
+    "/admin/api/background-scraper/status",
+    tags=["Admin"],
+    summary="Background Scraper Status",
+    description="Returns background scraper runtime status, queue stats, and latest run data.",
+)
+async def admin_background_scraper_status(
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    return JSONResponse(await background_scraper.get_status())
+
+
+@router.get(
+    "/admin/api/background-scraper/runs",
+    tags=["Admin"],
+    summary="Background Scraper Runs",
+    description="Returns recent background scraper runs.",
+)
+async def admin_background_scraper_runs(
+    admin_session: str = Cookie(None, description="Admin session token"),
+    limit: int = 20,
+):
+    require_admin_auth(admin_session)
+    safe_limit = max(1, min(limit, 200))
+    return JSONResponse(
+        {"runs": await background_scraper.get_recent_runs(limit=safe_limit)}
+    )
+
+
+@router.post(
+    "/admin/api/background-scraper/start",
+    tags=["Admin"],
+    summary="Start Background Scraper",
+    description="Starts the background scraper orchestrator.",
+)
+async def admin_background_scraper_start(
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    async with background_scraper_start_lock:
+        background_scraper.clear_finished_task()
+        if not background_scraper.task:
+            task = asyncio.create_task(background_scraper.start())
+            task.add_done_callback(_handle_background_scraper_task_done)
+            background_scraper.task = task
+    return JSONResponse({"success": True, "message": "Background scraper starting"})
+
+
+@router.post(
+    "/admin/api/background-scraper/stop",
+    tags=["Admin"],
+    summary="Stop Background Scraper",
+    description="Stops the background scraper orchestrator.",
+)
+async def admin_background_scraper_stop(
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    await background_scraper.stop()
+    return JSONResponse({"success": True, "message": "Background scraper stopped"})
+
+
+@router.post(
+    "/admin/api/background-scraper/drain",
+    tags=["Admin"],
+    summary="Stop Background Scraper After Current Run",
+    description=(
+        "Lets the active background scrape run finish, then stops the orchestrator "
+        "before another run starts. Stops immediately when no run is active."
+    ),
+)
+async def admin_background_scraper_drain(
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    if not background_scraper.is_running:
+        return JSONResponse(
+            {
+                "success": True,
+                "state": "stopped",
+                "message": "Background scraper is already stopped",
+            }
+        )
+
+    scheduled = await background_scraper.drain()
+    if scheduled:
+        state = "scheduled"
+        message = "Background scraper will stop after the current run"
+    else:
+        state = "stopped"
+        message = "Background scraper stopped; no run was active"
+    return JSONResponse({"success": True, "state": state, "message": message})
+
+
+@router.delete(
+    "/admin/api/background-scraper/drain",
+    tags=["Admin"],
+    summary="Cancel Scheduled Background Scraper Stop",
+    description="Cancels a pending stop-after-current-run request.",
+)
+async def admin_background_scraper_cancel_drain(
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    cancelled = background_scraper.cancel_drain()
+    return JSONResponse(
+        {
+            "success": True,
+            "state": "running" if cancelled else "unchanged",
+            "message": (
+                "Scheduled background scraper stop cancelled"
+                if cancelled
+                else "No scheduled background scraper stop"
+            ),
+        }
+    )
+
+
+@router.post(
+    "/admin/api/background-scraper/pause",
+    tags=["Admin"],
+    summary="Pause Background Scraper",
+    description="Pauses the background scraper orchestrator.",
+)
+async def admin_background_scraper_pause(
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    paused = await background_scraper.pause()
+    if not paused:
+        return JSONResponse(
+            {"success": False, "message": "Background scraper is not running"},
+            status_code=400,
+        )
+    return JSONResponse({"success": True, "message": "Background scraper paused"})
+
+
+@router.post(
+    "/admin/api/background-scraper/resume",
+    tags=["Admin"],
+    summary="Resume Background Scraper",
+    description="Resumes the background scraper orchestrator.",
+)
+async def admin_background_scraper_resume(
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    resumed = await background_scraper.resume()
+    if not resumed:
+        return JSONResponse(
+            {"success": False, "message": "Background scraper is not running"},
+            status_code=400,
+        )
+    return JSONResponse({"success": True, "message": "Background scraper resumed"})
+
+
+@router.post(
+    "/admin/api/background-scraper/requeue-dead",
+    tags=["Admin"],
+    summary="Requeue Dead Background Scraper Entries",
+    description="Requeues dead background scraper media items and episodes for retry.",
+)
+async def admin_background_scraper_requeue_dead(
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    requeued = await background_scraper.requeue_dead_items()
+    return JSONResponse(
+        {
+            "success": True,
+            "message": "Dead background scraper entries requeued",
+            "requeued": requeued,
+        }
+    )

@@ -2,6 +2,548 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [2.58.0](https://github.com/g0ldyy/comet/compare/v2.57.0...v2.58.0) (2026-07-27)
+
+
+### Features
+
+* **cloudflare:** add Torznab cache rule for improved feed caching ([bd375e7](https://github.com/g0ldyy/comet/commit/bd375e7975902934c44d48104f5a04ae28cf5f37))
+
+## [2.57.0](https://github.com/g0ldyy/comet/compare/v2.56.0...v2.57.0) (2026-07-26)
+
+
+### Features
+
+* **torznab:** update feed serialization to ignore offset and limit p… ([46a4ca3](https://github.com/g0ldyy/comet/commit/46a4ca3eea34dc7c63f78d3cb3dedb3c4eeeab37))
+* **torznab:** update feed serialization to ignore offset and limit parameters, enhance response structure ([c32729e](https://github.com/g0ldyy/comet/commit/c32729e55691c5afe203698ab3335a12deaeed83))
+
+## [2.56.0](https://github.com/g0ldyy/comet/compare/v2.55.0...v2.56.0) (2026-07-25)
+
+
+### Features
+
+* **discovery:** optimize peer validation process and enhance snapsho… ([28d4371](https://github.com/g0ldyy/comet/commit/28d4371e5e1526a7d192d0549a5f2fa4c5600918))
+* **discovery:** optimize peer validation process and enhance snapshot handling during discovery updates ([fc92860](https://github.com/g0ldyy/comet/commit/fc92860906fa994d9391e34df9117cce1087ca4b))
+
+## [2.55.0](https://github.com/g0ldyy/comet/compare/v2.54.2...v2.55.0) (2026-07-25)
+
+
+### Features
+
+* add INDEXER_LANGUAGES setting for multi-language title support ([426a74b](https://github.com/g0ldyy/comet/commit/426a74b8d68c45179cfef8d19b9bd2ade66ca113))
+* **background-scraper:** add graceful stop after current run ([ed9403d](https://github.com/g0ldyy/comet/commit/ed9403d829d12995e1df2165ff59d3a86360f6f0))
+* **background-scraper:** add graceful stop after current run ([afa3de2](https://github.com/g0ldyy/comet/commit/afa3de2e4f60d10266cd3d9daa7cb7b5bfb7140c))
+* **background-scraper:** enhance drain endpoint for graceful stop and idempotency ([e391e10](https://github.com/g0ldyy/comet/commit/e391e10f247157289850ec313ea19099cfcd7f2b))
+* **dependencies:** add dev dependency group for pytest ([a78841e](https://github.com/g0ldyy/comet/commit/a78841e68d465b2bcf88a9085b2851d3ea4dd24c))
+* **docker:** update Dockerfile to use slim images and improve package installation ([403b1dc](https://github.com/g0ldyy/comet/commit/403b1dc1fe8fc299e010385b1ed0945def0177ab))
+* enhance debrid account cleanup with provider filtering and anime type resolution ([d2b2a77](https://github.com/g0ldyy/comet/commit/d2b2a77618277c3dd573c08bd1636bd678da9695))
+* enhance indexer title search with canonical and original title options ([52c51fd](https://github.com/g0ldyy/comet/commit/52c51fd6243cfa93a8670bb255b253682de0e81a))
+* **healthcheck:** implement healthcheck module and update Dockerfile for healthcheck command ([be7e691](https://github.com/g0ldyy/comet/commit/be7e6911282ecf6ed611687c70279f52701d4820))
+* **imdb:** enhance title matching to return nearest match for year ([1e5874e](https://github.com/g0ldyy/comet/commit/1e5874ea755eda1969cdf9677ea133612f5a21c1))
+* implement debrid account cache cleanup functionality and related migrations ([1278146](https://github.com/g0ldyy/comet/commit/1278146bd3a85935f8288a2c529544131a07f5ae))
+* **media_search:** refine logging for series with season and episode ([19b6b02](https://github.com/g0ldyy/comet/commit/19b6b023179007e60f386d68864a29417afc8291))
+* **observability:** add documentation for multi-replica Prometheus deployment ([6820e00](https://github.com/g0ldyy/comet/commit/6820e0044fff3c4482af7610c0ce12f5c3ec3a4d))
+* **observability:** add Grafana dashboard preview and image asset ([261da21](https://github.com/g0ldyy/comet/commit/261da21ec80f1e8e9cd4fe4b4cbb6fc980a77ddf))
+* **observability:** add Prometheus metrics and Grafana dashboards ([ed71812](https://github.com/g0ldyy/comet/commit/ed7181227c0125e53b4a48c1a65f25a24ebf3595))
+* **observability:** enhance Prometheus metrics authentication and update documentation for configuration ([3801780](https://github.com/g0ldyy/comet/commit/38017809c3ff207ebafb417a084b68d5b61cb223))
+* **observability:** refactor Prometheus integration and update Grafana dashboard queries ([73e5bb9](https://github.com/g0ldyy/comet/commit/73e5bb91971731bf235563550bc03b57450aa796))
+* **observability:** streamline Grafana admin password generation in Docker setup ([5a7d19a](https://github.com/g0ldyy/comet/commit/5a7d19aab9ba21b45c9e358413645149e4b0bd66))
+* **observability:** update Docker Compose instructions for Prometheus and Grafana setup ([f40ef95](https://github.com/g0ldyy/comet/commit/f40ef9587b3511b67713b39e594459d5045eabe8))
+* remove Latin diacritics from titles for improved indexer compatibility ([de8c8f8](https://github.com/g0ldyy/comet/commit/de8c8f8441dff724ff7079ebbf9a1eef20c13ca5))
+* **scraper:** add context-aware timeout policies ([07f6668](https://github.com/g0ldyy/comet/commit/07f66689860d89687e8b6c72e251285a8d93d2f1))
+* **scraper:** add context-aware timeout policies ([69b1f32](https://github.com/g0ldyy/comet/commit/69b1f32daed02d683bec92241b9e019acb6041ea))
+* **scraper:** enhance timeout resolution for indexer managers and add related tests ([dfad7b8](https://github.com/g0ldyy/comet/commit/dfad7b85b828cfd2c5af4fe51a6098264b5cc7b3))
+* **tests:** add test for Gunicorn control socket configuration ([907acc4](https://github.com/g0ldyy/comet/commit/907acc4ed2626300c2226a463b5c3be8e88e7e8a))
+* **tests:** add unit tests for template response handling in admin and config endpoints ([8eb98c5](https://github.com/g0ldyy/comet/commit/8eb98c522384fc45fa3fa126d3d84c1fe70f5afc))
+* **torznab:** add native Torznab search endpoint ([fa6da35](https://github.com/g0ldyy/comet/commit/fa6da35233fc3c90e3dc13d71bd80ca0a69ac19e))
+* **torznab:** add native Torznab search endpoint ([a49a41b](https://github.com/g0ldyy/comet/commit/a49a41b99eec5108498cccd9af4e488e64e7a268))
+* **torznab:** add Torznab client integration and update documentation ([c32f3cb](https://github.com/g0ldyy/comet/commit/c32f3cbf0dbe7109b50526caa8bacd2f652b99f8))
+* **torznab:** refactor magnet link generation and improve torrent serialization ([bf534dc](https://github.com/g0ldyy/comet/commit/bf534dcc71898e7e5049c2e0f2e4114bdacc91be))
+
+
+### Bug Fixes
+
+* **background:** calculate queue age from eligibility time ([9ed8119](https://github.com/g0ldyy/comet/commit/9ed81191459e776e24f3b2734110988534578c9b))
+* **background:** calculate queue age from eligibility time ([061091e](https://github.com/g0ldyy/comet/commit/061091edd81f1d71b0c46951b5e7de5e4c48df34))
+* **cache:** preserve empty scrape retries and throttle demand writes ([0de0302](https://github.com/g0ldyy/comet/commit/0de03023c0febff0cec59e5de57f823638c0bbfd))
+* **chilllink:** improve media_id construction for series type ([9cb1a8a](https://github.com/g0ldyy/comet/commit/9cb1a8af71c4d8a5292fae30333588771d1da0fe))
+* **cometnet:** add end-to-end IPv6 support ([de1e381](https://github.com/g0ldyy/comet/commit/de1e381ae353a6fc57f162332cd8cd8d9b65e3c7))
+* **cometnet:** add end-to-end IPv6 support ([3eb9988](https://github.com/g0ldyy/comet/commit/3eb9988a4cec56ed940a9d6adc713b3dc8235e15))
+* **cometnet:** handle IPv6 addresses in host formatting ([eefb140](https://github.com/g0ldyy/comet/commit/eefb14076d547bb6522c9e38a23082518f4f63a5))
+* **config:** restore saved filters and update Punjabi flag ([d75a0e5](https://github.com/g0ldyy/comet/commit/d75a0e543a8a32d14f60d15813be3de9afde5674))
+* **config:** restore saved filters and update Punjabi flag ([8caddf6](https://github.com/g0ldyy/comet/commit/8caddf6799c21366c22c850cc30fcb7c1768231f))
+* **deps:** update torrent-parse-rank source to latest commit ([4f11532](https://github.com/g0ldyy/comet/commit/4f11532057934ca1539fd5bf925f1b2dae2a54fc))
+* **docker:** remove unnecessary user creation and ownership in Dockerfile ([3cf92a4](https://github.com/g0ldyy/comet/commit/3cf92a4de9b9305bb5dda0bbcac4e55779206907))
+* **formatting:** simplify director's cut condition check ([9cb1a8a](https://github.com/g0ldyy/comet/commit/9cb1a8af71c4d8a5292fae30333588771d1da0fe))
+* **models:** replace random password generation with secure secret generation ([9cb1a8a](https://github.com/g0ldyy/comet/commit/9cb1a8af71c4d8a5292fae30333588771d1da0fe))
+* **scraper:** update scraper type hint for better clarity ([9cb1a8a](https://github.com/g0ldyy/comet/commit/9cb1a8af71c4d8a5292fae30333588771d1da0fe))
+* **series:** support aggregate searches and scoped debrid caching ([ce5cae5](https://github.com/g0ldyy/comet/commit/ce5cae50a86449a40e744c81dc22eb96b7d88e12))
+* **series:** support aggregate searches and scoped debrid caching ([c2d3d79](https://github.com/g0ldyy/comet/commit/c2d3d79cbf2897b96cc299bb45c45535c369ff12))
+
+## [2.54.2](https://github.com/g0ldyy/comet/compare/v2.54.1...v2.54.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **anime:** handle list imdb_id from Fribb ([a26cc5c](https://github.com/g0ldyy/comet/commit/a26cc5cd02f2ef2878ea47df1af949c6bde96e40))
+* **filtering:** match multi-title releases with a foreign first title ([00063cf](https://github.com/g0ldyy/comet/commit/00063cf73c02a80dedd271eba5a202f7868851b6))
+* **filtering:** match multi-title releases with a foreign first title ([8697e1b](https://github.com/g0ldyy/comet/commit/8697e1beefe2258a73a15a0c7688c7a1553a5e27))
+* **ui:** Offcloud now uses an API key, not email:password ([a1c6323](https://github.com/g0ldyy/comet/commit/a1c6323e0d4ad85faa89b746fa11dafb2fcca8de))
+* **ui:** Offcloud now uses an API key, not email:password ([c617a16](https://github.com/g0ldyy/comet/commit/c617a16f5cb9b07e2d0642b9628a12d3d734aef4))
+
+## [2.54.1](https://github.com/g0ldyy/comet/compare/v2.54.0...v2.54.1) (2026-04-27)
+
+
+### Bug Fixes
+
+* **cometnet:** clarify invalid websocket proxy handshakes ([75326c9](https://github.com/g0ldyy/comet/commit/75326c9bc5ea9434d0c1aa72a902365b2bdb7e83))
+* **cometnet:** clarify invalid websocket proxy handshakes ([70947a1](https://github.com/g0ldyy/comet/commit/70947a1768b7e16a7d438238420e953e51c63860))
+* **cometnet:** detect websocket upgrades via Sec-WebSocket-Key when Connection header is stripped by upstream proxy ([37f7206](https://github.com/g0ldyy/comet/commit/37f720661d362b3f35fe49e3e8574b7c49b87443))
+
+## [2.54.0](https://github.com/g0ldyy/comet/compare/v2.53.0...v2.54.0) (2026-04-26)
+
+
+### Features
+
+* **cometnet:** make websocket compression configurable ([79a681c](https://github.com/g0ldyy/comet/commit/79a681c3aaf14ab2d78cf8dbdd7ac32a5633e757))
+* implement episode matching policy for improved media handling ([02c0569](https://github.com/g0ldyy/comet/commit/02c05695895c41d1ff772d49919d42f3dfeacd25))
+* implement episode matching policy for improved media handling ([d406bb5](https://github.com/g0ldyy/comet/commit/d406bb5828c8b892c291a50fa63c4a938ef5d7e7))
+
+
+### Bug Fixes
+
+* allow debrid-verified season packs in account snapshots ([0529c04](https://github.com/g0ldyy/comet/commit/0529c049fb882dd4001d78a566ff769b3e39625f))
+* ambigus query ([41874cb](https://github.com/g0ldyy/comet/commit/41874cb81d475595e59aac8b0cdf6f5ed5bc03d5))
+* **cometnet:** batch sign torrents in batch broadcast endpoint ([f59712c](https://github.com/g0ldyy/comet/commit/f59712c685e32588525e0423c3b8783eaa45a089))
+* **cometnet:** batch sign torrents in batch broadcast endpoint ([a349013](https://github.com/g0ldyy/comet/commit/a3490133d19a723bac843fad831b4064f8f69f7d))
+* update sqlite in Docker image ([8d868ce](https://github.com/g0ldyy/comet/commit/8d868ce7b923baaa7455b2bf507c0661af700a00))
+
+
+### Performance Improvements
+
+* **cometnet:** disable permessage-deflate on WebSocket connections ([d39a0e1](https://github.com/g0ldyy/comet/commit/d39a0e12194ca051dc5bd1ed4b727ee3e29e51d3))
+* **cometnet:** disable permessage-deflate on WebSocket connections ([04bdfe8](https://github.com/g0ldyy/comet/commit/04bdfe87bd7a750ac9f5ec6833c4b452b72aff6a))
+
+## [2.53.0](https://github.com/g0ldyy/comet/compare/v2.52.0...v2.53.0) (2026-03-18)
+
+
+### Features
+
+* add effective peer address resolution for WebSocket connections ([0a80dd4](https://github.com/g0ldyy/comet/commit/0a80dd4092e6e1e4d714da613e609148a1abd01e))
+* add live preview for result format selection in the UI ([5394a40](https://github.com/g0ldyy/comet/commit/5394a40777d864b281c0ec112ca3989038e66e7f))
+* add live preview for result format selection in the UI ([8d5ef18](https://github.com/g0ldyy/comet/commit/8d5ef18843947a49e003add3f142c09a27eba4e9))
+* add memory management features to optimize resource usage ([76ccb4d](https://github.com/g0ldyy/comet/commit/76ccb4d690670745096bf67720db0537e9687880))
+* add series episode index refresh functionality ([f028b22](https://github.com/g0ldyy/comet/commit/f028b2209e0e8b0a4eb33d823ce2780e40f9438d))
+* add series episode index refresh table to migration schema ([ac232f5](https://github.com/g0ldyy/comet/commit/ac232f5fca9cb123b3ec7d7d3688fd8029632c0d))
+* enforce strict episode matching with air-date indexing ([d74d2ee](https://github.com/g0ldyy/comet/commit/d74d2ee8745839fe8f577089fdd4833601938cc1))
+* enforce strict episode matching with air-date indexing ([aebaf73](https://github.com/g0ldyy/comet/commit/aebaf7390d40eb806d65751ca678f9855d1122ed))
+* enhance database functionality with new predicates and JSON handling ([21ebac8](https://github.com/g0ldyy/comet/commit/21ebac83524923e754726d91770b9c33503cc7d1))
+* enhance memory management with mimalloc support ([54f3f06](https://github.com/g0ldyy/comet/commit/54f3f062e71b2ec0e2d4fd46fe2a84888696cfa7))
+* enhance URL handling in scrapers with context-aware parsing ([8546296](https://github.com/g0ldyy/comet/commit/8546296d3394df2a8c84679dc1bb6513002567c9))
+* improve periodic memory trimming with enhanced error handling ([5af2dbe](https://github.com/g0ldyy/comet/commit/5af2dbe64f1a6a2384f1f105dff1ff9a28381f5c))
+* introduce common Docker build workflow and streamline existing workflows ([ca28fb8](https://github.com/g0ldyy/comet/commit/ca28fb8e49bfd853d806c4c2bf5e9540d7b7b2da))
+* log memory trim interval in startup information ([e7288c1](https://github.com/g0ldyy/comet/commit/e7288c1ab4d0768ee02096ad4acbbc6dc8dbdecb))
+* switch to the Rust filename parser ([d12f80c](https://github.com/g0ldyy/comet/commit/d12f80cf9dea7b391aceed6ee012122410522e52))
+* update TPR link ([bc012df](https://github.com/g0ldyy/comet/commit/bc012dfbfd69e67fc8783e43c75b4a51bff65f91))
+
+
+### Bug Fixes
+
+* add missing API key header in Trakt aliases request ([3db3769](https://github.com/g0ldyy/comet/commit/3db37694df23054e5206254dfebdea6f680114de))
+* correct bandwidth statistics update logic ([d1e37bb](https://github.com/g0ldyy/comet/commit/d1e37bb81e7f7fcea24cce36de896b231da3e3b7))
+* don't use DOMContentLoaded as it isn't needed ([a30637c](https://github.com/g0ldyy/comet/commit/a30637c6025f11f2ec3b98b2e6732fd342f125aa))
+* don't use DOMContentLoaded as it isn't needed ([15d405e](https://github.com/g0ldyy/comet/commit/15d405efdff7627ea710910672f866eaf677096a))
+* enforce media ID requirement for torrent operations ([44f423d](https://github.com/g0ldyy/comet/commit/44f423d4be229b487de1863ac903da2232f997ee))
+* enforce non-empty imdb_id requirement in torrent metadata ([386b4dd](https://github.com/g0ldyy/comet/commit/386b4dd1ad75badd43031c73cfc445aa4f37f168))
+* enhance error logging in info hash normalization ([26ecdf2](https://github.com/g0ldyy/comet/commit/26ecdf2310c36afaf10dd15c41c20721dfc0d7ab))
+* exclude miniupnpc version 2.3.3 and update to 2.3.2 ([a168860](https://github.com/g0ldyy/comet/commit/a1688600238666e812e8f597d17aa934369ddd1e))
+* handle missing video size in torrent behavior hints ([bab5445](https://github.com/g0ldyy/comet/commit/bab5445a785c46bd4ad1e67198af088692d0a2fd))
+* import gunicorn in run_with_gunicorn function to fix windows issues ([7f89f7a](https://github.com/g0ldyy/comet/commit/7f89f7a1ee2c09dcfc8f0dcb2799de060ffd365b))
+* import gunicorn in run_with_gunicorn function to fix windows issues ([cecb61e](https://github.com/g0ldyy/comet/commit/cecb61e8d85c5387f4ae6a46a4aec0831dd7e17c))
+* optimize search metrics query in admin API ([610f7e7](https://github.com/g0ldyy/comet/commit/610f7e7fb9fcc0be7ecd3e2cc9cd31c49cb9568d))
+* **playback:** Fix name_query not being parsed ([798bf80](https://github.com/g0ldyy/comet/commit/798bf8002c6f98646a4986c9cef919b515aa93b6))
+* **playback:** Fix name_query not being parsed ([458be8c](https://github.com/g0ldyy/comet/commit/458be8c857cc9f5716aab87f26378090431fa6f0))
+* **playback:** Validate and strip torrent name and video name parameters ([2476bb0](https://github.com/g0ldyy/comet/commit/2476bb02de86c96d6d606fa70d8cd3083e6218e3))
+* prevent auto-scrolling when new logs are appended if not at the bottom ([5457db0](https://github.com/g0ldyy/comet/commit/5457db0143fa19cd6056d8531f0fe20860cb10e1))
+* prevent auto-scrolling when new logs are appended if not at the bottom ([19bf51f](https://github.com/g0ldyy/comet/commit/19bf51f64d981d07c37a94811fcf0f687ff10c37))
+* simplify metadata_updated_at assignment in SQL queries ([952217e](https://github.com/g0ldyy/comet/commit/952217ece69d76377054e79d85d43a5c00a2724d))
+* simplify metadata_updated_at assignment in SQL queries ([6298755](https://github.com/g0ldyy/comet/commit/6298755ea0382b778551020924231fd723ebd354))
+* update last_seen_at timestamp in background scraper ([b1fbab5](https://github.com/g0ldyy/comet/commit/b1fbab57f1fbde799d0acb573f4aabacac72fbfa))
+* update media ID matching logic in background scraper ([52dca3b](https://github.com/g0ldyy/comet/commit/52dca3b1f0c02d39560693335a8b0452894c759b))
+* update miniupnpc dependency and Dockerfile cache configuration ([c31bfe1](https://github.com/g0ldyy/comet/commit/c31bfe16707c46354b420dd8cdbc6a4e48ecad52))
+* update search query timestamps in admin API metrics ([44b7432](https://github.com/g0ldyy/comet/commit/44b7432f018f310a5448bca04c70b88ba353e653))
+
+## [2.52.0](https://github.com/g0ldyy/comet/compare/v2.51.0...v2.52.0) (2026-02-19)
+
+
+### Features
+
+* add Stremio API prefix support in Kodi plugin and update settings ([c6d5587](https://github.com/g0ldyy/comet/commit/c6d5587448242f33c8be5d2b70893116c712c15d))
+* enhance admin and configuration session management with secure token handling and improved session validation ([6c0e943](https://github.com/g0ldyy/comet/commit/6c0e943847cb1980a2fdf6ded7af28d77d51b645))
+* enhance session security and validation in configuration endpoints with improved token handling and error management ([94a5af2](https://github.com/g0ldyy/comet/commit/94a5af2cf5110ead6fd42e4d1ca0d12b16bd04a0))
+* implement status video responses for debrid sync and playback errors, and add new status video assets ([1ec5383](https://github.com/g0ldyy/comet/commit/1ec5383561a8eff8ae638945905b5ac244b9ecd8))
+* refactor authentication handling in CometNet UI ([e104a74](https://github.com/g0ldyy/comet/commit/e104a740beef49e01291697cb3ac2fabdcec117e))
+* refactor authentication handling in CometNet UI ([f859926](https://github.com/g0ldyy/comet/commit/f85992684a13c3e3327f27383e38ecc3c11e60bd))
+* update status video assets and enhance error handling in StremThru class ([ba10378](https://github.com/g0ldyy/comet/commit/ba10378a9e00754a0a7a056b5005e768a0924e72))
+
+
+### Bug Fixes
+
+* add config route with prefix when configuration password is enabled ([a9a3892](https://github.com/g0ldyy/comet/commit/a9a389255889274f6ecef11a2b35031e82046516))
+* add validation to sanitize next URL in configuration endpoint to prevent backslashes ([d64302c](https://github.com/g0ldyy/comet/commit/d64302cc253b206cbd7123d56328ba5304526c5b))
+* enhance error handling in StremThru class for missing download links and update error type in generate_status_videos.py ([0ebe670](https://github.com/g0ldyy/comet/commit/0ebe670979eb4998b22e8a27fb5246b2b8b6e4f3))
+* improve type hinting for configuration parameters and enhance error logging in token persistence ([3588754](https://github.com/g0ldyy/comet/commit/358875449d76aae8b321d4bd7e0edda931f94c30))
+* update CONFIGURE_PAGE_PASSWORD default value to None for improved clarity in configuration settings ([4ef1f2d](https://github.com/g0ldyy/comet/commit/4ef1f2dd2e60ed80c1add25dc14c3a2755574ef4))
+
+## [2.51.0](https://github.com/g0ldyy/comet/compare/v2.50.0...v2.51.0) (2026-02-13)
+
+
+### Features
+
+* implement Cinemeta as a fallback for IMDB metadata retrieval and centralize year parsing into a new utility module ([29d79c1](https://github.com/g0ldyy/comet/commit/29d79c100bc16213be23a0fd3c4cf2b1f1588948))
+
+## [2.50.0](https://github.com/g0ldyy/comet/compare/v2.49.0...v2.50.0) (2026-02-11)
+
+
+### Features
+
+* add `parsed_matches_target` utility and use it to centralize season/episode filtering logic ([47b79ee](https://github.com/g0ldyy/comet/commit/47b79ee7fb0e4131ebe595da37c54be0a0f753a8))
+* add `tzdata` package and set `TZ` environment variable to `UTC` ([29ac052](https://github.com/g0ldyy/comet/commit/29ac0525a55943612a4e3521acd843ddb7e00f71))
+* add COMET_CLEAN_TRACKER setting to control tracker list display in Comet scraper ([a35327b](https://github.com/g0ldyy/comet/commit/a35327b111b8459926c7c8e3751e2388e16bf0e0))
+* add configurable reachability check settings including retries, delay, and timeout for improved connection handling ([16f5df4](https://github.com/g0ldyy/comet/commit/16f5df4bceb1d2e77286a913eb27f543b62ab25d))
+* add Debrid Account Scraper feature description to README ([4f4e351](https://github.com/g0ldyy/comet/commit/4f4e3518e48b01d3d543a2750d44d7f63afbe4c5))
+* add debug logging to `_validate_torrent` for various torrent validation failure conditions ([bde663f](https://github.com/g0ldyy/comet/commit/bde663f48ad406f9d3e8a3f6de1ae88744d0c157))
+* add DMM to supported scrapers and introduce DMM Ingester feature ([68fa89d](https://github.com/g0ldyy/comet/commit/68fa89de2dbb4ab8c7950b8a6cd51dc4308d34e2))
+* add external reachability check for COMETNET_ADVERTISE_URL and introduce COMETNET_SKIP_REACHABILITY_CHECK for local testing ([f8983c7](https://github.com/g0ldyy/comet/commit/f8983c73970eec309476eef4afd8b48bf3657d09))
+* add HTTP request handling to the WebSocket server for graceful responses to non-WebSocket requests ([4b0a187](https://github.com/g0ldyy/comet/commit/4b0a18738b364550500478d379f9f393529f193b))
+* add local torrent existence check to optimize gossip validation and enhance message re-propagation ([8e04047](https://github.com/g0ldyy/comet/commit/8e04047c58b80791a74e448184427582206bbbea))
+* add logging for incoming connection handling in ConnectionManager to track extracted IPs ([fe23a34](https://github.com/g0ldyy/comet/commit/fe23a34511e093d959a8ff1c807bea1aba4898e5))
+* add max latency configuration and handling in CometNet to disconnect peers exceeding acceptable latency, enhancing network performance ([39b5e1b](https://github.com/g0ldyy/comet/commit/39b5e1b327c593bc2453824c798a7f19e7c33074))
+* add method to reset discovery hysteresis in BackgroundScraperWorker for improved task management ([2a97dda](https://github.com/g0ldyy/comet/commit/2a97ddafde9b5a9be95e8761b7b8ac0e7d80a4a9))
+* add optional node alias to CometNet ([9af324f](https://github.com/g0ldyy/comet/commit/9af324fc9b44d9435f328e966febfe779e7b8f24))
+* add periodic state save functionality to CometNetService with configurable interval ([a209467](https://github.com/g0ldyy/comet/commit/a2094671d90c5c5c9d4422b5d6c8fc8ebfc14634))
+* add persistence for the gossip engine's statistics ([8e71ee2](https://github.com/g0ldyy/comet/commit/8e71ee2ffa4cf86e5cf10aa7a1198200c745a70a))
+* add PostgreSQL-specific logic for refreshing scrape locks using `RETURNING 1` to confirm update success ([dd8f8de](https://github.com/g0ldyy/comet/commit/dd8f8de42a1c8963542d9cf35f70064c6df42ee0))
+* add support for cached availability checks across multiple services ([228cba0](https://github.com/g0ldyy/comet/commit/228cba0554509fa90068a02fa764f079a8b4266f))
+* add version information display and update checking functionality to the admin dashboard ([d8c7aa8](https://github.com/g0ldyy/comet/commit/d8c7aa8c1395c2f96d256d215964ed8c1a5cbd69))
+* allow `_scrape_media_type` to signal early termination and stop the scraping loop ([b96fd1f](https://github.com/g0ldyy/comet/commit/b96fd1f3de710d2ba70549d1a38f28cd16b5e64b))
+* allow Kodi setup codes to be 6-16 characters long and update related prompts ([1c5b963](https://github.com/g0ldyy/comet/commit/1c5b9634d8e423cc4943191baf17f20bd2b7e2bd))
+* apply reputation penalty when an invalid hex signature is encountered ([e23d630](https://github.com/g0ldyy/comet/commit/e23d63031dd25baf89b0a8c6fa950cf29a5972ac))
+* asynchronously validate manifests and canonicalize float values for signature stability, while improving shutdown handling and error logging ([67083f2](https://github.com/g0ldyy/comet/commit/67083f22e0214e31e4252c89c80d5192b2af24e1))
+* cache public key representations, validate incoming info hashes, and generalize message sending to support raw bytes ([6d74cef](https://github.com/g0ldyy/comet/commit/6d74cef8243dd8117b5ed56bd59ed8e9bd0430b8))
+* canonicalize pool manifest timestamps to integers for signing to resolve float precision issues ([67240ad](https://github.com/g0ldyy/comet/commit/67240adec810ee49afd6dcf2a3043b0aecd908c4))
+* derive `node_id` from public key for `PoolMember` and update admin dashboard to display node IDs ([bcd1b14](https://github.com/g0ldyy/comet/commit/bcd1b1478ba9466465913b304962cefcc45d3d1a))
+* display current branch in the admin dashboard version information and visually refresh the version details section ([4b8ad5f](https://github.com/g0ldyy/comet/commit/4b8ad5fe85a4930f5fb5ef1147f47e8ada52c1e5))
+* display peer torrents received in the admin dashboard and include reputation data in peer information ([1be6218](https://github.com/g0ldyy/comet/commit/1be62185a2b24c8b40e67253a0903c4626bc6f03))
+* document CometNet P2P network and remove Nginx reverse proxy configuration from README ([f66c0f2](https://github.com/g0ldyy/comet/commit/f66c0f22ea836244fc2b629c951622a769b396e5))
+* enable standalone CometNet service to directly save discovered torrents to the database ([9caab14](https://github.com/g0ldyy/comet/commit/9caab14a1b4ab31c8c566a0903000d501760d8b0))
+* enhance admin dashboard with background scraper next cycle display and controls ([c2ce896](https://github.com/g0ldyy/comet/commit/c2ce896cc19fa1378078f83cfcb42aa663a0408f))
+* enhance client IP retrieval in CometNetService by adding support for WebSocket requests ([b9f3dfa](https://github.com/g0ldyy/comet/commit/b9f3dfa8f30ddaed9d67d2dcf187291bfaa086db))
+* enhance COMETNET_ADVERTISE_URL validation with security checks for internal domains, private IPs, and port range, and improve reachability checks for public IPs ([2da0020](https://github.com/g0ldyy/comet/commit/2da00206b4eb1a52642b0c295c5a0d519e1c712d))
+* enhance copyInviteLink function to use async clipboard API with fallback for insecure contexts ([cce81ec](https://github.com/g0ldyy/comet/commit/cce81ecd9f70712d949690fc84a605960fa813cf))
+* enhance cryptographic verification by adding public key loading and signature verification methods ([5e0afc0](https://github.com/g0ldyy/comet/commit/5e0afc0d25411497c1276350844b07584fb5a603))
+* enhance debrid service to enrich torrent metadata from availability checks ([1699808](https://github.com/g0ldyy/comet/commit/1699808b479501a7dfc5bcfc00a982452c11b992))
+* enhance DebridService with file index coercion and parsed data merging ([fe63e77](https://github.com/g0ldyy/comet/commit/fe63e772d7d75cbe4ac8a497105f854991ef3c60))
+* enhance formatting functions with customizable styles for components and streamline secret string handling in Kodi setup ([3799022](https://github.com/g0ldyy/comet/commit/3799022b6095fb0c3dcee9785022ec83ee2fa300))
+* enhance gossip statistics by adding repropagation tracking and updating dashboard labels ([80cc495](https://github.com/g0ldyy/comet/commit/80cc4954989fc9a201a91a986cc9697352eb8653))
+* enhance handshake logging in ConnectionManager for better debugging and error tracking ([454817e](https://github.com/g0ldyy/comet/commit/454817e4b4c3c7e7c8e7a6238b637bc13d97f420))
+* enhance info hash normalization with error handling and new format support ([6b9b33d](https://github.com/g0ldyy/comet/commit/6b9b33d0325a13f92c5f05d5ce69ea701fe92f66))
+* enhance reachability check logic in `check_advertise_url_reachability` to handle hairpin NAT scenarios and improve logging for verification results ([20226ae](https://github.com/g0ldyy/comet/commit/20226aed5acfabc9fe0b70d6c9b996abfe3f0bf0))
+* enhance state loading to tolerate integrity hash mismatches ([1fe70be](https://github.com/g0ldyy/comet/commit/1fe70be76d8018be94b920f60d36b3470448841d))
+* enhance system clock synchronization check to use multiple endpoints and provide detailed error reporting ([9f51226](https://github.com/g0ldyy/comet/commit/9f51226dd45dd5b09b4444cd0057272a11ada6aa))
+* enhance WebSocket connection and handshake logging in ConnectionManager to improve debugging and error tracking ([35f32d6](https://github.com/g0ldyy/comet/commit/35f32d674aa4e8a8e49f9583d7f25a85d64a1020))
+* enhance WebSocket connection logging in CometNetService for improved client IP tracking ([979a26e](https://github.com/g0ldyy/comet/commit/979a26edd797584b756761f255c8041dc59852bb))
+* filter episodes based on the retry status of their associated series item ([0696166](https://github.com/g0ldyy/comet/commit/06961667fe9053e8755fc49ee0cbcd7c803aa99d))
+* implement a custom Kodi setup dialog with dedicated error alerts and expand the Kodi add-on documentation ([526c6e2](https://github.com/g0ldyy/comet/commit/526c6e2c2d55ccfea9a18bf040475e4c499542d2))
+* implement a custom Kodi setup dialog with dedicated error alerts and expand the Kodi add-on documentation ([6aaf39d](https://github.com/g0ldyy/comet/commit/6aaf39d3e637e330941b40e3bb96c47ad69b4225))
+* implement a Kodi repository build system, including a new Makefile, generation script, repository definition, and GitHub Actions workflow ([cd2f6ab](https://github.com/g0ldyy/comet/commit/cd2f6ab470eea9154ad73b83549cee9f3121af1e))
+* implement and integrate pool member contribution tracking within the PoolStore and record contributions during gossip processing ([f67b941](https://github.com/g0ldyy/comet/commit/f67b9419992acc6aa89fee05a3ca2cb0e708d870))
+* implement concurrent lock maintenance as a separate task to ensure continuous scraping and robustly handle lock loss ([1172adf](https://github.com/g0ldyy/comet/commit/1172adf25896cda2db2157079f928b4caa266fe5))
+* implement debrid account torrent scraping ([c36475b](https://github.com/g0ldyy/comet/commit/c36475bd7c135c4bf0de637ab167607ffacb0747))
+* implement dedicated crypto executor management in utils and shutdown procedure in CometNetService to enhance resource handling ([a944efc](https://github.com/g0ldyy/comet/commit/a944efc9c1b7bc26b896f3d38e2b7c83b5f7d4a1))
+* implement distributed locking for the background scraper and remove the `background_scraper_progress` table ([1b9d8e1](https://github.com/g0ldyy/comet/commit/1b9d8e1ac4850b47d159d77f6dbfda95919b0c3d))
+* implement functionality for users to leave CometNet pools with role-based restrictions ([4081d11](https://github.com/g0ldyy/comet/commit/4081d1147736f4573984c7e5e013284f14ec97d6))
+* implement mandatory and auto-generated `COMETNET_API_KEY`, and add auto-generation for `ADMIN_DASHBOARD_PASSWORD` and `PROXY_DEBRID_STREAM_PASSWORD` ([29a8a5a](https://github.com/g0ldyy/comet/commit/29a8a5a04decc3f291524140d2308425b8557b03))
+* implement membership reconciliation in CometNetService and improve error logging in CometNetRelay ([6cca3f4](https://github.com/g0ldyy/comet/commit/6cca3f4ac1c38499c07df9bcbe100293770322b9))
+* implement message rate limiting and refactor message security validation into a dedicated module ([0a75780](https://github.com/g0ldyy/comet/commit/0a7578009dc7bb1a864726fa9b786556531f4d23))
+* implement new pools management UI with filtering and search functionality in admin dashboard ([12c4695](https://github.com/g0ldyy/comet/commit/12c46955dae25216d533089d0fdfea4e9e340d9a))
+* implement private network mode with HMAC authentication, status display, and enhanced logging ([e154fc0](https://github.com/g0ldyy/comet/commit/e154fc0deb482912415a69d9114fa431ce340ec0))
+* implement proactive distributed lock refreshing and add error handling for background tasks ([c170fc6](https://github.com/g0ldyy/comet/commit/c170fc68a0ae35befd7408d3149c5a7a02f3d483))
+* implement queue-based backpressure and discovery pausing for the background scraper using watermarks ([af664a7](https://github.com/g0ldyy/comet/commit/af664a716beb19b7863feebc0d70c87628a85bf1))
+* implement queue-based backpressure and discovery pausing for the background scraper using watermarks ([6eaff9c](https://github.com/g0ldyy/comet/commit/6eaff9c8d8ffd3166d6e87335c3634bdc09b8a9c))
+* implement resolution-based selection of info hashes for torrent streaming ([1814efa](https://github.com/g0ldyy/comet/commit/1814efa84c0e54ddb93a2ef8ffce224cc398bc40))
+* implement seadex scraper and fix anime media id parser ([436de99](https://github.com/g0ldyy/comet/commit/436de999f9ef25de8e804af7363e7d6fdb78a648))
+* implement self-removal from pools by broadcasting a signed leave message and updating local cleanup logic ([db15cd7](https://github.com/g0ldyy/comet/commit/db15cd72cc0bf878b6da9625d8c73c9ce5ec3ee2))
+* implement sharded and deduplicated filter parse cache ([fab96ae](https://github.com/g0ldyy/comet/commit/fab96ae3a48af71f2d9ab4627475586e14971f27))
+* implement system clock synchronization check on CometNet startup with configurable tolerance and timeout ([51a81e4](https://github.com/g0ldyy/comet/commit/51a81e49d38d93aa2cfdd5507b908d31f0902625))
+* improve caching and scraping by supporting linked Kitsu and IMDb media IDs and refining season/episode parameters for debrid services ([072dcab](https://github.com/g0ldyy/comet/commit/072dcaba45b27468467913258c9ee1c073b06d4f))
+* improve client IP extraction in WebSocket connections by introducing get_client_ip_any function and updating connection handling in CometNetService and ConnectionManager ([f2f5838](https://github.com/g0ldyy/comet/commit/f2f58389ff1ce7e6f42b1bdc24fa04acb52182b4))
+* improve connection handling in ConnectionManager by closing duplicate connections and reusing existing ones ([bd0a5f4](https://github.com/g0ldyy/comet/commit/bd0a5f465bee3720b10db3c9c17659bdcdabf9b0))
+* improve data canonicalization by sorting visited nodes and robustly handling dictionary keys, and add debug logging for signature verification ([2c8b3f7](https://github.com/g0ldyy/comet/commit/2c8b3f716d540324e088793986dd6e998a1a88d2))
+* improve error handling in torrent title parsing ([85fc456](https://github.com/g0ldyy/comet/commit/85fc4566c845ea0bd2f4e52fa9ebe3d5cad3d963))
+* improve error handling in torrent title parsing ([42a93d4](https://github.com/g0ldyy/comet/commit/42a93d4c22df5926f448ff9eadea5b828a2a1418))
+* improve Kodi integration with direct VideoInfoTag usage, robust setup, and refined stream info handling ([a62dc06](https://github.com/g0ldyy/comet/commit/a62dc062c8334efb5fa65a197a6c784928a42e47))
+* increase default relay timeout and add specific handling for `asyncio.TimeoutError` during batch sends ([f8819b1](https://github.com/g0ldyy/comet/commit/f8819b1c1763869623b4cb7a6b38ebd9cd1dd3e3))
+* init cometnet ([748249e](https://github.com/g0ldyy/comet/commit/748249e647f58c9bf37c1d069c44802d7a4d5ed7))
+* introduce a dirty manifest tracking mechanism and `flush_dirty_manifests` method to batch manifest writes ([b37ec8a](https://github.com/g0ldyy/comet/commit/b37ec8a2befa921fe62107d4dc18b262d7ec7ebb))
+* Introduce DMM ingester ([19001ee](https://github.com/g0ldyy/comet/commit/19001eeb6b4f6b45e14880a998a2a6ed19df5200))
+* introduce Kodi addon with pairing service, setup utilities, and updated documentation ([d27239d](https://github.com/g0ldyy/comet/commit/d27239d8fbd33d5c549345d9c52ff16efb9dc924))
+* introduce smart language detection by leveraging country-specific Trakt aliases ([c413428](https://github.com/g0ldyy/comet/commit/c4134289e80385b839a22df18c724b7c83369738))
+* log private addresses announced by incoming peers and add a setting to prevent sharing private IPs during PEX ([7160406](https://github.com/g0ldyy/comet/commit/71604060c8ad54e9ea998ace90facb3311b7559e))
+* log specific timeout warnings for scraper exceptions instead of general ratelimiting messages. ([311bfae](https://github.com/g0ldyy/comet/commit/311bfaee844a51e184d3a99f8fd0c44ab39b57b9))
+* nekobt scraper ([da28fc4](https://github.com/g0ldyy/comet/commit/da28fc4e5c4c5ae5727b73db73b9e6b5bb0a8f0f))
+* new background scraper ([cebb785](https://github.com/g0ldyy/comet/commit/cebb785d21058fe9cd70ceaa407add3724d42120))
+* optimize queue snapshot retrieval in BackgroundScraperWorker by consolidating database queries and normalizing discovery limits ([dabbee5](https://github.com/g0ldyy/comet/commit/dabbee5c5bd749f5d0006edce852481e5d4f7216))
+* record own contributions ([a36a9d1](https://github.com/g0ldyy/comet/commit/a36a9d19efff9e93e909306f999b224e5602f06e))
+* refactor HTTP client management and enhance caching mechanisms ([4178cda](https://github.com/g0ldyy/comet/commit/4178cda8b538641605ef91740e7c524acead6c4e))
+* refactor HTTP client management and enhance caching mechanisms ([efca5db](https://github.com/g0ldyy/comet/commit/efca5dbfded727e02a5f335ad8e6941151949f3c))
+* relax connection limits and overrepresentation checks for private IP addresses ([a8cefbd](https://github.com/g0ldyy/comet/commit/a8cefbd66ec0cf79dec5f6585f8844ac1059e053))
+* schedule debrid account sync tasks as background tasks when warm sync does not time out ([577a83e](https://github.com/g0ldyy/comet/commit/577a83eec9cc6a7889d7d0f87ff19c811c017e77))
+* seadex anime only ([e15125a](https://github.com/g0ldyy/comet/commit/e15125a339b27a7f3c976b6dd140c5da99c41483))
+* seadex anime only ([9b36762](https://github.com/g0ldyy/comet/commit/9b36762c5ac4d5582b7026631a5f175b8a5a67c0))
+* standardize database conflict handling and type checks with new constants, and add cometnet torrent existence batch check callback ([f8e76e9](https://github.com/g0ldyy/comet/commit/f8e76e9b1832f23369e2905b5a7c19d52c7fed64))
+* track and handle completion of debrid account sync background tasks ([041a3ac](https://github.com/g0ldyy/comet/commit/041a3acc0e658647e5bf8603979fc3901ef6a353))
+* update canonicalization to preserve float precision and add signature verification debug logs ([f1e871e](https://github.com/g0ldyy/comet/commit/f1e871e8abcb2d5542ab07a5bc81d9300e1ad516))
+* update Kodi integration with new configuration handling, improved manifest URL generation, and enhanced user prompts ([43964ac](https://github.com/g0ldyy/comet/commit/43964accbc8e80c570acc843bc0175b4caed0aa0))
+* version and update checker ([7c9842a](https://github.com/g0ldyy/comet/commit/7c9842a937ab117c02913141bd24d9a09c211a83))
+
+
+### Bug Fixes
+
+* `_save_manifest_async` now returns a boolean, allowing `flush_dirty_manifests` to re-queue failed manifest saves ([cfb648a](https://github.com/g0ldyy/comet/commit/cfb648a06cd99c30aaaf1f3be6721ac410a7a687))
+* add HTTP status error handling to AnimeTosho and correct status attribute usage in Nyaa ([b188eda](https://github.com/g0ldyy/comet/commit/b188edadd5e0d5d0cdb06ccac2a99e65abba80e7))
+* adjust background scraper cycle timing to account for missed cycles ([39da5c5](https://github.com/g0ldyy/comet/commit/39da5c5d2ed3182587902f444f8a26458d61280f))
+* broaden WebSocket noise error filtering ([47b4657](https://github.com/g0ldyy/comet/commit/47b465729b3922cb261082674d8e8e9804d21ca6))
+* chunk `execute_many` calls for SQLite to respect its parameter limit ([2352aa6](https://github.com/g0ldyy/comet/commit/2352aa6a0f0e138b9d4c586903e1ff028fbafaa1))
+* cinemata no releaseInfo ([5f1ca3e](https://github.com/g0ldyy/comet/commit/5f1ca3ea53a657567b7dd04e30fd8a5f167437cc))
+* correct tracker extraction logging for SeaDex scraper ([44aa0d8](https://github.com/g0ldyy/comet/commit/44aa0d840b71b1ca5e543b3373cd3db23ec36a96))
+* D ([721fa0f](https://github.com/g0ldyy/comet/commit/721fa0fcffe9c289594d4e02d2e86f4f2772edb0))
+* default `name_query` parameter to an empty string instead of `None` ([49a7302](https://github.com/g0ldyy/comet/commit/49a7302066d6f470a5b5efa8a7b62d702bf07971))
+* **docker:** add make to build dependencies for miniupnpc ([2fcb2ef](https://github.com/g0ldyy/comet/commit/2fcb2ef4b82d58fdf59087354124578ea9d1643f))
+* **docker:** increase uv timeout to 300s to avoid network errors ([dc98727](https://github.com/g0ldyy/comet/commit/dc987272af34f939db0f11a8f2a28129907f7927))
+* ensure default last_seen time is used when sorting keys in PublicKeyStore ([b7bf69e](https://github.com/g0ldyy/comet/commit/b7bf69e620d6b89bed05f7e72fe8b8bfda169dbb))
+* ensure proper cancellation of in-flight tasks in BackgroundScraperWorker during cancellation ([5d4c5fd](https://github.com/g0ldyy/comet/commit/5d4c5fd70ac1f004b90e01f67ea5634230fc19c3))
+* ensure proper lock refresh handling and add read timeout for DMM hashlist downloads. ([bbf2639](https://github.com/g0ldyy/comet/commit/bbf2639ca6c34aeafdd3e6b25e356c56f0aff52b))
+* ensure proper shutdown and tracking of relay batch flush tasks and reorder README features ([53b9c61](https://github.com/g0ldyy/comet/commit/53b9c61b277548e095bd4a6934aee2b1119020da))
+* ensure season and episode checks in `parsed_matches_target` handle None values correctly ([0a9ace9](https://github.com/g0ldyy/comet/commit/0a9ace9db0efef99823497bcbaa0a9bfd5072a75))
+* ensure TorrentMetadata size is an integer and sort pool members by public key for deterministic serialization ([5fe3307](https://github.com/g0ldyy/comet/commit/5fe330795582ff37607421d89fdf57d014dc7970))
+* exclude subscribed and member pools from the discover count calculation ([37e7e6f](https://github.com/g0ldyy/comet/commit/37e7e6f5c1dd07c21eea9e6b21d8dcaf4d4954c1))
+* filter private IPs from PEX and warn on misconfiguration ([7ee5b20](https://github.com/g0ldyy/comet/commit/7ee5b208c61a54dd9ab43d89868f528ab8212c5b))
+* first search emptying itself when torrent cache ttl is -1 ([9237b8c](https://github.com/g0ldyy/comet/commit/9237b8c7065f77500a5486311a2495ac96bb7dd7))
+* fix _persist_kitsu_imdb_mapping method ([40a8fc3](https://github.com/g0ldyy/comet/commit/40a8fc387e0c5ce5200c9e0dd5f5a02965ad4bf8))
+* fix various memory leaks ([3798971](https://github.com/g0ldyy/comet/commit/37989716c5388c0acdfd0dfc204e87ae0587d907))
+* fix volume on official docker compose ([820ebf0](https://github.com/g0ldyy/comet/commit/820ebf0ae3d1f577add6fb8ff48df122f66d647f))
+* gracefully cancel and drain in-flight scraping tasks upon lock loss instead of abruptly stopping ([2268e8f](https://github.com/g0ldyy/comet/commit/2268e8f106fb7fd2c77d4adfd34134cb01ffb7f4))
+* gracefully handle UnicodeEncodeError during filename processing in DMM ingester ([6e68a93](https://github.com/g0ldyy/comet/commit/6e68a9398460fe9cedc2494148d91f67769de3d9))
+* handle tracker extraction more robustly by ensuring it defaults to None when not present ([7fd92bc](https://github.com/g0ldyy/comet/commit/7fd92bc83ffdbad082ce94d0d4aaf5db1967f6b6))
+* improve error handling for WebSocket connections with detailed logging ([1c536c8](https://github.com/g0ldyy/comet/commit/1c536c8b126b513762433d55618aee11e9fdf8d6))
+* pin mediaflow-proxy dependency to version 2.4.1 for compatibility ([a69a1df](https://github.com/g0ldyy/comet/commit/a69a1dfefa5de052a2cfc1bee50bd90ef19e28d9))
+* pool join ([c09a143](https://github.com/g0ldyy/comet/commit/c09a14374c815405d0e1f044844499398f1abb73))
+* postgres ([11aef0f](https://github.com/g0ldyy/comet/commit/11aef0f98525e1f05fd22010077d16a6abc8be22))
+* potential race can drop queued broadcasts during timeout shutdown ([92aadf3](https://github.com/g0ldyy/comet/commit/92aadf32daf531b6cf418ce6b1962883e3ae9f3c))
+* prevent CometNet from starting with multiple FastAPI workers in non-relay mode ([a76a36a](https://github.com/g0ldyy/comet/commit/a76a36acc11d51d03917debd627073a414758c0e))
+* prevent CometNet startup with private advertise URLs on public networks unless explicitly allowed ([e6c8a4c](https://github.com/g0ldyy/comet/commit/e6c8a4c57a6c2d39b3dcd47fc3725668e857ad63))
+* print full traceback for exceptions occurring during the scraping cycle ([0bf3390](https://github.com/g0ldyy/comet/commit/0bf3390dfe55564e73b8bf66ab22d7c5613507d4))
+* remove `OR_IGNORE` from the `first_searches` INSERT statement ([390b452](https://github.com/g0ldyy/comet/commit/390b45223870954aa1ab63832fef8461407450eb))
+* remove ellipsis from truncated node ID displays in the admin dashboard ([96e333d](https://github.com/g0ldyy/comet/commit/96e333d01960442d5671010d5559c6133a5fc488))
+* remove signal handler ([bad47c4](https://github.com/g0ldyy/comet/commit/bad47c45030206329805d41a8f6127608ab57c55))
+* remove the update check interval and related logic to always perform an update check ([9327826](https://github.com/g0ldyy/comet/commit/9327826ed497b8678a9989942352ef2955cad92d))
+* suppress unsupported HTTP method HEAD errors from websockets logs using a new filter ([de4cd80](https://github.com/g0ldyy/comet/commit/de4cd808ba202d9b6123010f2b76ad9e8bab3cd2))
+* tracker extraction result is discarded ([9448806](https://github.com/g0ldyy/comet/commit/9448806ea5a8ad1fd7581d8353ad9c72d0ae2f01))
+* update anime_entries insert query to handle conflicts by updating existing data ([fa15430](https://github.com/g0ldyy/comet/commit/fa15430ba298a20f14756a81dc3bd6a37aa4e60f))
+* update contribution recording logic in `PoolStore` to allow contributions to be recorded across all pools if no specific pool ID is provided, enhancing flexibility in member contribution tracking ([2887a22](https://github.com/g0ldyy/comet/commit/2887a223b995f40d6017412dc2dce09535c76f94))
+* update lock expiration logic in DistributedLock to refresh based on current loop time ([372efe2](https://github.com/g0ldyy/comet/commit/372efe28b999eb85129170cae5ecd05e9d6dcb8e))
+
+
+### Performance Improvements
+
+* convert key network discovery and cryptographic operations to asynchronous to prevent event loop blocking ([73af287](https://github.com/g0ldyy/comet/commit/73af2875f2e49e64918cddc5bf49cdd5caf29926))
+* offload CPU-bound cryptographic operations to an executor, optimize torrent batch processing, and cache public key data ([6a9f9fd](https://github.com/g0ldyy/comet/commit/6a9f9fdf2d16e0a4e91dd5ecb03670db29a52dcf))
+* remove torrent debrid service short-circuit ([04386ed](https://github.com/g0ldyy/comet/commit/04386ed619036842e47ce2b3140d3eff198523ca))
+
+## [2.49.0](https://github.com/g0ldyy/comet/compare/v2.48.0...v2.49.0) (2026-01-15)
+
+
+### Features
+
+* enhance error handling in multi-debrid service availability checks ([b1d621a](https://github.com/g0ldyy/comet/commit/b1d621ae18b8104d5bdf3f11445afe7bba9d352e))
+* implement multi-debrid service support and enhance configuration ([6cadc4d](https://github.com/g0ldyy/comet/commit/6cadc4d57595632162118553c7952fc20c367dd6))
+* implement multi-debrid service support and enhance configuration ([f6abcf5](https://github.com/g0ldyy/comet/commit/f6abcf5e4c38339f14c3cc462782b010bfc90aae))
+* optimize service availability checks by filtering unique services ([9296da1](https://github.com/g0ldyy/comet/commit/9296da1aa22d13503747ad93578fc428505e4fe3))
+
+## [2.48.0](https://github.com/g0ldyy/comet/compare/v2.47.0...v2.48.0) (2026-01-15)
+
+
+### Features
+
+* add DATABASE_FORCE_IPV4_RESOLUTION setting and update logging ([4b6c51a](https://github.com/g0ldyy/comet/commit/4b6c51af39e1b88c25771fe1b9fc2f4363c441f5))
+* add hostname resolution method to ReplicaAwareDatabase ([81842ba](https://github.com/g0ldyy/comet/commit/81842bacf8d5ac4f1be1cffac46c79155e3075a8))
+* add manifest and configure page caching settings ([6b9dbcd](https://github.com/g0ldyy/comet/commit/6b9dbcdab3672f7890c98895ca50e6bbdfe74832))
+* add manifest and configure page caching settings ([60c90bc](https://github.com/g0ldyy/comet/commit/60c90bc2e842808c7fbf91d861bcf1a5916fc054))
+* add support for downloading generic trackers at startup ([4e701d8](https://github.com/g0ldyy/comet/commit/4e701d89c8eba70fb9998e9bba932aefc9d677db))
+* enhance caching policies and improve manifest handling ([463ab41](https://github.com/g0ldyy/comet/commit/463ab4154c9a1c39428c1acdbcb9b8bba04aa68a))
+* enhance caching policies and improve manifest handling ([23ab2f4](https://github.com/g0ldyy/comet/commit/23ab2f44b187f72048376bd3637395d781344276))
+* enhance language settings and parsing functionality ([430b630](https://github.com/g0ldyy/comet/commit/430b6308a11744cf81e41b6093facbcadacd31e1))
+* implement IPv4 hostname resolution in ReplicaAwareDatabase ([ddde28f](https://github.com/g0ldyy/comet/commit/ddde28f8a51fa682d9051460c2cd8e15856309b3))
+* pin python version ([566b28d](https://github.com/g0ldyy/comet/commit/566b28d13fbfc51031e3f93e83acc65c4774797f))
+* remove unused index ([52609ad](https://github.com/g0ldyy/comet/commit/52609addaf54c0d6fa6c576cdc191f1a1ffc4a8e))
+* update resolution options ([212d874](https://github.com/g0ldyy/comet/commit/212d8744c177ecd7cbfd636c3f8eecf25eb10cfb))
+* update resolution options ([53961ef](https://github.com/g0ldyy/comet/commit/53961ef442ec689ca4bc2aa51efbba3b1323c547))
+
+
+### Bug Fixes
+
+* clear trackers list before downloading new data ([d396007](https://github.com/g0ldyy/comet/commit/d396007a1954f7f25506f7585a51b8fa1484c408))
+* correct formatting in README.md ([8ff725d](https://github.com/g0ldyy/comet/commit/8ff725dc63740c330bd1fd0228d5bffac331f1b1))
+* correct typo in DATABASE_FORCE_IPV4_RESOLUTION comment in .env-sample ([f80430d](https://github.com/g0ldyy/comet/commit/f80430d706c208cc2c2fd25b6ad47918a7014a37))
+* handle 404 response in Peerflix scraper ([7fa0c2b](https://github.com/g0ldyy/comet/commit/7fa0c2bb4b690a860f6195d47dc1ad2572e6cecc))
+* preserve quality and languages from original parsed data in DebridService ([3f93efb](https://github.com/g0ldyy/comet/commit/3f93efb19b504a30cb78b0f23f74b003fef00756))
+* set default max executor workers to 1 ([e683637](https://github.com/g0ldyy/comet/commit/e6836374eccf51feb7ea2ee3e1f6e06f8bc1f013))
+
+## [2.47.0](https://github.com/g0ldyy/comet/compare/v2.46.0...v2.47.0) (2026-01-09)
+
+
+### Features
+
+* add background and icon image assets ([d9dceab](https://github.com/g0ldyy/comet/commit/d9dceabcb071abaaa525e5a0dfae3c9ffd2a1ab2))
+* anime mapping disabler ([1c0bf9b](https://github.com/g0ldyy/comet/commit/1c0bf9bcc4f8e90a5433bf18e8fabd37b309f9ef))
+* enhance database indexing and improve torrent processing efficiency ([add3813](https://github.com/g0ldyy/comet/commit/add3813663a6d65c5d893f33161852cb1ba817ad))
+* fix a few useless things ([1f29c4c](https://github.com/g0ldyy/comet/commit/1f29c4ca1ba074f35760ce7549098b68e6b7d778))
+* fix aiostreams null infoHash ([880927c](https://github.com/g0ldyy/comet/commit/880927c9186d1bb38a6103e5c8c52bfcef41a69a))
+* fix slow anime mapper loading ([67f7740](https://github.com/g0ldyy/comet/commit/67f774029d0394f53d3999943bbd04e184605065))
+* implement HTTP caching mechanism ([35eab54](https://github.com/g0ldyy/comet/commit/35eab54a7caa68f152583014680e7605619f36d4))
+* implement smart file selection algorithm and refine torrent record management for multi-episode content ([479b5ae](https://github.com/g0ldyy/comet/commit/479b5ae8ff2bc800b9ed8dff0f418189391e1342))
+* kitsu offsets ([4af9add](https://github.com/g0ldyy/comet/commit/4af9addd7b05f69a16df317b1e5fbe2aa3e62d2b))
+* log http cache environment variables on startup ([f6751e5](https://github.com/g0ldyy/comet/commit/f6751e529c2ceec3685514f35c2c73c63b143cc7))
+* remove verbose logging from anime service ([8cd1e0b](https://github.com/g0ldyy/comet/commit/8cd1e0bce6795e6b6f1987355a49d38a183677ac))
+* super mega powerful ultra anime mapper ([7035b24](https://github.com/g0ldyy/comet/commit/7035b24b3ca9cf7d5d190080b03e425f003849ec))
+
+
+### Bug Fixes
+
+* add check for existing info_hash in torrents before processing ([06bbe9b](https://github.com/g0ldyy/comet/commit/06bbe9bbd84cd4f632f3115500a4219864414b54))
+* CachedJSONResponse overwrites body after init ([72bb885](https://github.com/g0ldyy/comet/commit/72bb8859a70152e1f4aea3188354d2e8ef66b8cc))
+* ETag caching broken by random manifest ID ([e74c29f](https://github.com/g0ldyy/comet/commit/e74c29fdd187a2dc8de257d70c09e30924ea70bf))
+* fix wrong ranking order in p2p mode ([d4d7e60](https://github.com/g0ldyy/comet/commit/d4d7e6091c3af431c3e5cbb9ec9bc48218b252d4))
+* little opti ([c7214f2](https://github.com/g0ldyy/comet/commit/c7214f213de8e96ecd06b5a32aa39bad5e23c466))
+* remove fake config from comet scraper ([b5856b6](https://github.com/g0ldyy/comet/commit/b5856b6554f04d4d9fc4cb0bc5f9d6da93dd9c36))
+* update asset URLs from ibb.co to GitHub raw content ([77c9f04](https://github.com/g0ldyy/comet/commit/77c9f043c32a59eeee53ae123323ce1afb3eed75))
+
+## [2.46.0](https://github.com/g0ldyy/comet/compare/v2.45.0...v2.46.0) (2026-01-06)
+
+
+### Features
+
+* add AnimeTosho scraper ([1b87b1e](https://github.com/g0ldyy/comet/commit/1b87b1e5017d06f59c63990d0ccb1c714a8494b5))
+
+## [2.45.0](https://github.com/g0ldyy/comet/compare/v2.44.0...v2.45.0) (2026-01-06)
+
+
+### Features
+
+* add `RTN_FILTER_DEBUG` setting to enable verbose logging for torrent filtering rejections ([b9cc11d](https://github.com/g0ldyy/comet/commit/b9cc11d109a68bac31732ed1ec7f253ae4ba1463))
+* add `RTN_FILTER_DEBUG` setting to enable verbose logging for torrent filtering rejections ([ddaafa2](https://github.com/g0ldyy/comet/commit/ddaafa22ca7b73bc62994da33f23bb0560488c3b))
+* allow configuration of ProcessPoolExecutor max workers with auto-detection and logging ([c6c5c42](https://github.com/g0ldyy/comet/commit/c6c5c42b974d6fe50ab3fd196d524345015d5dee))
+* allow configuration of ProcessPoolExecutor max workers with auto-detection and logging ([7e98d1f](https://github.com/g0ldyy/comet/commit/7e98d1f067b864261c40a871bdc6f98f38c7e0d5))
+* introduce `update_interval` for torrent upsert logic and implement batched upsert for SQLite ([6b83124](https://github.com/g0ldyy/comet/commit/6b831243ca289b7ae9323018161e4fb9a092396c))
+* introduce configurable exponential backoff for 429 rate limit errors ([b65c285](https://github.com/g0ldyy/comet/commit/b65c2857f9894a57939ee6a86833317ea730e983))
+* optimize PostgreSQL database operations by adding a covering index, enhancing debrid cache upserts with conditional updates, and refactoring torrent manager's advisory locking ([3911533](https://github.com/g0ldyy/comet/commit/39115334d81de44c4cb351b05f2fa86f0bab286e))
+* switch from session-level to transaction-level PostgreSQL advisory locks for database cleanup and batched upserts ([04dfd38](https://github.com/g0ldyy/comet/commit/04dfd38c8f892af72d33641ab3b8af900e68b3e3))
+* update BitMagnet scraper to use IMDb ID and media type for queries ([3ef2d34](https://github.com/g0ldyy/comet/commit/3ef2d3454bbd456da43ff29c21e125e2e51a1f27))
+* update BitMagnet scraper to use IMDb ID and media type for queries ([f53c53b](https://github.com/g0ldyy/comet/commit/f53c53ba1726e2f88f747b0395aee9d462130811))
+
+
+### Bug Fixes
+
+* add error handling for torrent title extraction and unreleased content in comet scraper ([7db932f](https://github.com/g0ldyy/comet/commit/7db932ff66c86c3fd30502f5bdadb2a703b88bf7))
+* correctly handle `None` values for season and episode parameters in API requests for bitmagnet ([9b91793](https://github.com/g0ldyy/comet/commit/9b9179371daf0e91f345b328dfda309941f68724))
+* preserve original traceback when re-raising exceptions ([b1cf30b](https://github.com/g0ldyy/comet/commit/b1cf30b4e82f51ec6695e10efde4589979220f09))
+* remove 60-second minimum for live torrent cache update interval calculation ([0b27e3c](https://github.com/g0ldyy/comet/commit/0b27e3cb4d43f26d45840a4aa5efa84ada7d113c))
+* remove early exit when torrent content is not digitally released ([9137096](https://github.com/g0ldyy/comet/commit/913709628874699eb6664c5a4e5005a8cf98396e))
+
+
+### Performance Improvements
+
+* add `idx_torrents_info_hash` for improved lookup performance ([b669b37](https://github.com/g0ldyy/comet/commit/b669b379c07ba28c8ea8abdff058b77786e1b350))
+* add index on torrents (info_hash, season) to optimize concurrent DELETE operations ([980fe19](https://github.com/g0ldyy/comet/commit/980fe194f63003bc464fe5ac0919f804d3171698))
+* remove conditional check for empty `sanitized_rows` before `execute_many` database call ([f1d3ea3](https://github.com/g0ldyy/comet/commit/f1d3ea3bdbee02a06785e9ae60f2bfd64d6f06e7))
+* remove PostgreSQL covering index `idx_torrents_covering` for torrents table ([4f0be0a](https://github.com/g0ldyy/comet/commit/4f0be0a786681cfac1f8e43d98c538abdf762cb9))
+* use non-blocking advisory locks and conditionally insert rows based on lock acquisition ([fb47fa5](https://github.com/g0ldyy/comet/commit/fb47fa51f862ee68b483d250555346455e8d3f56))
+* use non-blocking advisory locks and conditionally insert rows based on lock acquisition ([60ff4be](https://github.com/g0ldyy/comet/commit/60ff4be61c84fabfce1d664ed464a42f3006e6eb))
+
+## [2.44.0](https://github.com/g0ldyy/comet/compare/v2.43.0...v2.44.0) (2026-01-04)
+
+
+### Features
+
+* add new scraper configurations and clarify the `PROXY_ETHOS` `on_failure` option in the sample environment file ([4a34aad](https://github.com/g0ldyy/comet/commit/4a34aad8b7dfc32b18b868f57cbd6b60460e36bb))
+* add TorrentsDB scraper and remove redundant `pass` statements in other scrapers ([f486247](https://github.com/g0ldyy/comet/commit/f4862470a50b4463f1d287bb48688c8a4ab3e343))
+* add TorrentsDB scraper and remove redundant `pass` statements in other scrapers ([c26140d](https://github.com/g0ldyy/comet/commit/c26140d6ce5ef0474ca2d1f616af138560f158ed))
+* enable dynamic proxy configuration by allowing extra Pydantic settings fields and setting the default proxy ethos to 'always' ([bbeafd7](https://github.com/g0ldyy/comet/commit/bbeafd7ac0e975f49bac68cbe0dd7b381b70d13e))
+* enhance network manager with proxy hostname resolution for curl_cffi ([65a7464](https://github.com/g0ldyy/comet/commit/65a7464acc1cbc84953aac19f99fc8024a984bb0))
+* refactor live torrent caching to differentiate between displaying existing results and triggering new scrapes, and update default cache TTLs ([7dde28d](https://github.com/g0ldyy/comet/commit/7dde28d88d409b1549a0dadd5cd4c2cc60bd3552))
+* refactor live torrent caching to differentiate between displaying existing results and triggering new scrapes, and update default cache TTLs ([7af6d09](https://github.com/g0ldyy/comet/commit/7af6d0980b2f22f9f9e0cf4edb5e236945bc36dd))
+
+
+### Bug Fixes
+
+* background scraper can't scrape tv shows ([620dca3](https://github.com/g0ldyy/comet/commit/620dca33c87511e7f8c4b43feaccf3ec47c94224))
+
+## [2.43.0](https://github.com/g0ldyy/comet/compare/v2.42.0...v2.43.0) (2026-01-02)
+
+
+### Features
+
+* add configurable `PROXY_DEBRID_STREAM_INACTIVITY_THRESHOLD` setting to enable and refine the cleanup of inactive debrid stream connections ([cfc0eae](https://github.com/g0ldyy/comet/commit/cfc0eaea847779e111b63a26d93f50714d859ab8))
+* add configurable `PROXY_DEBRID_STREAM_INACTIVITY_THRESHOLD` setting to enable and refine the cleanup of inactive debrid stream connections ([aef99f4](https://github.com/g0ldyy/comet/commit/aef99f43bed584f352c469c143693fdf27eb7b21))
+* add configuration and UI option to sort cached and uncached stream results together ([a472595](https://github.com/g0ldyy/comet/commit/a4725958d051a11eed651a065578691ec0d2e1d6))
+* add configuration and UI option to sort cached and uncached stream results together ([5fda0df](https://github.com/g0ldyy/comet/commit/5fda0df1a98f313c49fdd3e65eafd24ae792924e))
+* populate `sortCachedUncachedTogether` checkbox from settings ([a5698b2](https://github.com/g0ldyy/comet/commit/a5698b28ac64996e675dcf49867192286b5a33db))
+
+## [2.42.0](https://github.com/g0ldyy/comet/compare/v2.41.0...v2.42.0) (2026-01-02)
+
+
+### Features
+
+* add fallback to check watch providers for movie release dates when upcoming release date is unavailable ([ac2cafb](https://github.com/g0ldyy/comet/commit/ac2cafb8abc1c46f8d44c8682f80e0ea0b0cdf2f))
+* add fallback to check watch providers for movie release dates when upcoming release date is unavailable ([6b6e466](https://github.com/g0ldyy/comet/commit/6b6e466c7d053be137127d38d924e296cc03f192))
+* enhance client IP detection by checking multiple headers and validating IP addresses ([a584432](https://github.com/g0ldyy/comet/commit/a5844323d9a2fee4454fc88a4202a9c0e9d43519))
+* enhance client IP detection by checking multiple headers and validating IP addresses ([b64b7f6](https://github.com/g0ldyy/comet/commit/b64b7f6e57f321fad8671a8412b7d919e36285d4))
+
+## [2.41.0](https://github.com/g0ldyy/comet/compare/v2.40.0...v2.41.0) (2026-01-01)
+
+
+### Features
+
+* improve torrent batch processing with in-memory deduplication, PostgreSQL advisory locks, and enhance metadata handling ([ac061ac](https://github.com/g0ldyy/comet/commit/ac061acd71e3d68574f2cb22cdbc06fe705d78f8))
+* improve torrent batch processing with in-memory deduplication, PostgreSQL advisory locks, and enhance metadata handling ([45ff7c1](https://github.com/g0ldyy/comet/commit/45ff7c173abb49a050c4ba14103fe6beae845d32))
+
+
+### Bug Fixes
+
+* add explicit BIGINT casting to timestamp comparisons in cache cleanup queries ([a52e5c0](https://github.com/g0ldyy/comet/commit/a52e5c06a57f6c7d36d2eeb6cf68779b9a6d92f5))
+
+## [2.40.0](https://github.com/g0ldyy/comet/compare/v2.39.0...v2.40.0) (2025-12-31)
+
+
+### Features
+
+* conditionally apply digital release filter based on settings and remove redundant internal filter check ([489ed9b](https://github.com/g0ldyy/comet/commit/489ed9bdbe79aef571cbccb3b3742c4f9162c04e))
+* implement digital release filtering for movies and series using TMDB ([172fb5b](https://github.com/g0ldyy/comet/commit/172fb5b7d454fabf34670daae150d177b439de4e))
+* implement digital release filtering for movies and series using TMDB ([e05a0da](https://github.com/g0ldyy/comet/commit/e05a0da0665e8bd48a3a6cf7e696f012f74c28ca))
+* improve performance with process pool executor and optimize torrent caching/database writes ([5666a7d](https://github.com/g0ldyy/comet/commit/5666a7d019dcb3039ca6d30fa4f6908d6c58dca4))
+* improve performance with process pool executor and optimize torrent caching/database writes ([0ce6579](https://github.com/g0ldyy/comet/commit/0ce6579f3ff740cf2a91f5c9d6d9ee8eea6b8010))
+
+
+### Bug Fixes
+
+* update digital_release_cache.release_date column type to BIGINT ([7219330](https://github.com/g0ldyy/comet/commit/7219330bbe0fdefd292f7b90cce18b5286a2d756))
+
+
+### Performance Improvements
+
+* reduce RTN parsing chunk size to 20 and rework ProcessPoolExecutor system ([32e5127](https://github.com/g0ldyy/comet/commit/32e5127dd322b487948557c5b5a077e8548802e1))
+
 ## [2.39.0](https://github.com/g0ldyy/comet/compare/v2.38.0...v2.39.0) (2025-12-28)
 
 

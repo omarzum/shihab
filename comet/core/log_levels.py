@@ -38,6 +38,12 @@ CUSTOM_LOG_LEVELS = {
         "loguru_color": "<fg #71d6d6>",
         "no": 30,
     },
+    "KODI": {
+        "color": "#3ba3d0",
+        "icon": "📺",
+        "loguru_color": "<fg #3ba3d0>",
+        "no": 30,
+    },
     "SESSION": {
         "color": "#71d6d6",
         "icon": "🔒",
@@ -60,6 +66,36 @@ CUSTOM_LOG_LEVELS = {
         "color": "#E24A90",
         "icon": "📥",
         "loguru_color": "<fg #E24A90>",
+        "no": 20,
+    },
+    "FILTER": {
+        "color": "#FFD700",
+        "icon": "🛡️",
+        "loguru_color": "<fg #FFD700>",
+        "no": 35,
+    },
+    "PLAYBACK": {
+        "color": "#00FA9A",
+        "icon": "▶️",
+        "loguru_color": "<fg #00FA9A>",
+        "no": 35,
+    },
+    "COMETNET": {
+        "color": "#00BFFF",
+        "icon": "🌐",
+        "loguru_color": "<fg #00BFFF>",
+        "no": 40,
+    },
+    "DEBRID": {
+        "color": "#4dd4ff",
+        "icon": "⚡",
+        "loguru_color": "<fg #4dd4ff>",
+        "no": 38,
+    },
+    "DMM_INGEST": {
+        "color": "#71d6d6",
+        "icon": "📥",
+        "loguru_color": "<fg #71d6d6>",
         "no": 20,
     },
 }

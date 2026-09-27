@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html class="sl-theme-dark">
   <head>
     <meta charset="UTF-8" />
@@ -7,15 +7,18 @@
       content="width=device-width, initial-scale=1, shrink-to-fit=no"
     />
     <meta content="Comet" property="og:title" />
-    <meta content="Comet Dashboard Login" property="og:description" />
+    <meta
+      content="{{ page_description or 'Comet Dashboard Login' }}"
+      property="og:description"
+    />
     <meta content="#6b6ef8" data-react-helmet="true" name="theme-color" />
 
-    <title>Comet - Login</title>
+    <title>Comet - {{ login_title or 'Login' }}</title>
     <link
       id="favicon"
       rel="icon"
       type="image/x-icon"
-      href="https://i.ibb.co/LVGNJ0s/icon.jpg"
+      href="https://raw.githubusercontent.com/g0ldyy/comet/refs/heads/main/comet/assets/icon.png"
     />
 
     <link
@@ -44,9 +47,19 @@
           #25292c 0%,
           #0c0d13 100%
         );
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto,
-          "Helvetica Neue", "Noto Sans", "Liberation Sans", Arial, sans-serif,
-          "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          "Helvetica Neue",
+          "Noto Sans",
+          "Liberation Sans",
+          Arial,
+          sans-serif,
+          "Apple Color Emoji",
+          "Segoe UI Emoji",
+          "Segoe UI Symbol",
           "Noto Color Emoji";
         font-size: 1rem;
         font-weight: 400;
@@ -125,7 +138,8 @@
         border-radius: 50%;
         filter: drop-shadow(0 0 6px currentColor);
         transform: translate3d(104em, 0, 0);
-        animation: fall var(--fall-duration) var(--fall-delay) linear infinite,
+        animation:
+          fall var(--fall-duration) var(--fall-delay) linear infinite,
           tail-fade var(--tail-fade-duration) var(--fall-delay) ease-out
             infinite;
       }
@@ -235,7 +249,7 @@
             star.style.setProperty("--top-offset", `${randomTopOffset}vh`);
             star.style.setProperty(
               "--star-tail-length",
-              `${randomTailLength}em`
+              `${randomTailLength}em`,
             );
             star.style.setProperty("--fall-duration", `${randomFallDuration}s`);
             star.style.setProperty("--fall-delay", "0s");
@@ -255,6 +269,9 @@
         />
         Comet
       </p>
+      {% if page_title %}
+      <p class="admin-subtitle">{{ page_title }}</p>
+      {% endif %}
     </div>
 
     <div class="login-container">
@@ -267,22 +284,30 @@
       </div>
       {% endif %}
 
-      <form method="post" action="/admin/login">
+      <form method="post" action="{{ form_action or '/admin/login' }}">
+        {% if next_url %}
+        <input type="hidden" name="next" value="{{ next_url }}" />
+        {% endif %}
         <div class="form-item">
           <sl-input
             id="password"
             name="password"
             type="password"
-            label="Admin Password"
-            placeholder="Enter admin password"
+            label="{{ password_label or 'Admin Password' }}"
+            placeholder="{{ password_placeholder or 'Enter admin password' }}"
             required
             autofocus
           ></sl-input>
         </div>
 
         <div class="form-item">
-          <sl-button type="submit" variant="primary" class="login-button">
-            Sign In
+          <sl-button
+            type="submit"
+            variant="primary"
+            class="login-button"
+            data-loading-text="{{ button_loading_text or 'Signing In...' }}"
+          >
+            {{ button_text or 'Sign In' }}
           </sl-button>
         </div>
       </form>
@@ -305,7 +330,8 @@
 
         form.addEventListener("submit", function () {
           submitButton.loading = true;
-          submitButton.textContent = "Signing In...";
+          submitButton.textContent =
+            submitButton.dataset.loadingText || "Signing In...";
         });
       });
     </script>

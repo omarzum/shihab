@@ -1,11 +1,50 @@
+import base64
+import math
+from decimal import Decimal
+
 from RTN import ParsedData
+
+from comet.core.logger import logger
+from comet.core.models import settings
+from comet.utils.languages import LANGUAGE_EMOJIS
+
+
+def normalize_info_hash(info_hash: str) -> str:
+    if len(info_hash) == 32:
+        try:
+            info_hash = base64.b16encode(base64.b32decode(info_hash.upper())).decode(
+                "utf-8"
+            )
+        except Exception:
+            logger.opt(exception=True).debug(
+                f"Failed to normalize base32 info_hash {info_hash!r} to hex"
+            )
+
+    if len(info_hash) == 80:
+        try:
+            decoded_bytes = bytes.fromhex(info_hash)
+            decoded_str = decoded_bytes.decode("ascii")
+            if len(decoded_str) == 40:
+                int(decoded_str, 16)  # Validate it's hex
+                info_hash = decoded_str
+        except Exception:
+            logger.opt(exception=True).debug(
+                f"Failed to validate hex/ascii info_hash {info_hash!r}"
+            )
+
+    return info_hash.lower()
 
 
 def format_bytes(bytes_value):
     if bytes_value is None:
-        return "0 B"
-
+        return None
+    if isinstance(bytes_value, bool) or not isinstance(
+        bytes_value, (int, float, Decimal)
+    ):
+        return None
     bytes_value = float(bytes_value)
+    if not math.isfinite(bytes_value) or bytes_value < 0:
+        return None
 
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if bytes_value < 1024.0:
@@ -17,77 +56,28 @@ def format_bytes(bytes_value):
 def size_to_bytes(size_str: str):
     sizes = ["b", "kb", "mb", "gb", "tb"]
 
-    value, unit = size_str.split()
+    if type(size_str) is not str:
+        return None
+    parts = size_str.split()
+    if len(parts) != 2:
+        return None
+    value, unit = parts
 
-    value = float(value)
+    try:
+        value = float(value)
+    except ValueError:
+        return None
     unit = unit.lower()
 
-    if unit not in sizes:
+    if unit not in sizes or not math.isfinite(value) or value < 0:
         return None
 
     multiplier = 1024 ** sizes.index(unit)
     return int(value * multiplier)
 
 
-languages_emojis = {
-    "multi": "🌎",  # Dubbed
-    "en": "🇬🇧",  # English
-    "ja": "🇯🇵",  # Japanese
-    "zh": "🇨🇳",  # Chinese
-    "ru": "🇷🇺",  # Russian
-    "ar": "🇸🇦",  # Arabic
-    "pt": "🇵🇹",  # Portuguese
-    "es": "🇪🇸",  # Spanish
-    "fr": "🇫🇷",  # French
-    "de": "🇩🇪",  # German
-    "it": "🇮🇹",  # Italian
-    "ko": "🇰🇷",  # Korean
-    "hi": "🇮🇳",  # Hindi
-    "bn": "🇧🇩",  # Bengali
-    "pa": "🇵🇰",  # Punjabi
-    "mr": "🇮🇳",  # Marathi
-    "gu": "🇮🇳",  # Gujarati
-    "ta": "🇮🇳",  # Tamil
-    "te": "🇮🇳",  # Telugu
-    "kn": "🇮🇳",  # Kannada
-    "ml": "🇮🇳",  # Malayalam
-    "th": "🇹🇭",  # Thai
-    "vi": "🇻🇳",  # Vietnamese
-    "id": "🇮🇩",  # Indonesian
-    "tr": "🇹🇷",  # Turkish
-    "he": "🇮🇱",  # Hebrew
-    "fa": "🇮🇷",  # Persian
-    "uk": "🇺🇦",  # Ukrainian
-    "el": "🇬🇷",  # Greek
-    "lt": "🇱🇹",  # Lithuanian
-    "lv": "🇱🇻",  # Latvian
-    "et": "🇪🇪",  # Estonian
-    "pl": "🇵🇱",  # Polish
-    "cs": "🇨🇿",  # Czech
-    "sk": "🇸🇰",  # Slovak
-    "hu": "🇭🇺",  # Hungarian
-    "ro": "🇷🇴",  # Romanian
-    "bg": "🇧🇬",  # Bulgarian
-    "sr": "🇷🇸",  # Serbian
-    "hr": "🇭🇷",  # Croatian
-    "sl": "🇸🇮",  # Slovenian
-    "nl": "🇳🇱",  # Dutch
-    "da": "🇩🇰",  # Danish
-    "fi": "🇫🇮",  # Finnish
-    "sv": "🇸🇪",  # Swedish
-    "no": "🇳🇴",  # Norwegian
-    "ms": "🇲🇾",  # Malay
-    "la": "💃🏻",  # Latino
-}
-
-
 def get_language_emoji(language: str):
-    language_formatted = language.lower()
-    return (
-        languages_emojis[language_formatted]
-        if language_formatted in languages_emojis
-        else language
-    )
+    return LANGUAGE_EMOJIS.get(language.lower(), language)
 
 
 def format_video_info(data: ParsedData):
@@ -158,9 +148,9 @@ def format_quality_info(data: ParsedData):
         quality_parts.append("UPSCALED")
     if hasattr(data, "remastered") and data.remastered:
         quality_parts.append("REMASTERED")
-    if hasattr(data, "directorsCut") and data.directorsCut:
-        quality_parts.append("DIRECTOR'S CUT")
-    elif hasattr(data, "directors_cut") and data.directors_cut:
+    if (hasattr(data, "directorsCut") and data.directorsCut) or (
+        hasattr(data, "directors_cut") and data.directors_cut
+    ):
         quality_parts.append("DIRECTOR'S CUT")
     if hasattr(data, "extended") and data.extended:
         quality_parts.append("EXTENDED")
@@ -180,6 +170,101 @@ def format_group_info(data: ParsedData):
     return " • ".join(group_parts) if group_parts else ""
 
 
+comet_clean_tracker = settings.COMET_CLEAN_TRACKER
+
+
+_STYLE_EMOJI = {
+    "title": "📄 {}",
+    "video": "📹 {}",
+    "audio": "🔊 {}",
+    "quality": "⭐ {}",
+    "group": "🏷️ {}",
+    "seeders": "👤 {}",
+    "size": "💾 {}",
+    "tracker": "🔎 {}",
+    "tracker_clean": "🔎 Comet|{}",
+    "languages": None,
+}
+
+_STYLE_PLAIN = {
+    "title": "{}",
+    "video": "{}",
+    "audio": "{}",
+    "quality": "{}",
+    "group": "{}",
+    "seeders": "Seeders: {}",
+    "size": "Size: {}",
+    "tracker": "Source: {}",
+    "tracker_clean": "Source: Comet|{}",
+    "languages": "Languages: {}",
+}
+
+
+def _get_formatted_components(
+    data: ParsedData,
+    ttitle: str,
+    seeders: int,
+    size: int,
+    tracker: str,
+    result_format: list,
+    style: dict,
+):
+    has_all = "all" in result_format
+    components = {}
+
+    if has_all or "title" in result_format:
+        components["title"] = style["title"].format(ttitle)
+
+    if has_all or "video_info" in result_format:
+        info = format_video_info(data)
+        if info:
+            components["video"] = style["video"].format(info)
+
+    if has_all or "audio_info" in result_format:
+        info = format_audio_info(data)
+        if info:
+            components["audio"] = style["audio"].format(info)
+
+    if has_all or "quality_info" in result_format:
+        info = format_quality_info(data)
+        if info:
+            components["quality"] = style["quality"].format(info)
+
+    if has_all or "release_group" in result_format:
+        info = format_group_info(data)
+        if info:
+            components["group"] = style["group"].format(info)
+
+    if (has_all or "seeders" in result_format) and seeders is not None:
+        components["seeders"] = style["seeders"].format(seeders)
+
+    if (has_all or "size" in result_format) and size is not None:
+        components["size"] = style["size"].format(format_bytes(size))
+
+    if (has_all or "tracker" in result_format) and tracker:
+        if comet_clean_tracker and tracker[:6] == "Comet|":
+            components["tracker"] = style["tracker_clean"].format(
+                tracker.rsplit("|", 1)[-1]
+            )
+        else:
+            components["tracker"] = style["tracker"].format(tracker)
+
+    if (
+        (has_all or "languages" in result_format)
+        and hasattr(data, "languages")
+        and data.languages
+    ):
+        lang_fmt = style["languages"]
+        if lang_fmt is None:
+            components["languages"] = "/".join(
+                get_language_emoji(language) for language in data.languages
+            )
+        else:
+            components["languages"] = lang_fmt.format("/".join(data.languages))
+
+    return components
+
+
 def get_formatted_components(
     data: ParsedData,
     ttitle: str,
@@ -188,52 +273,22 @@ def get_formatted_components(
     tracker: str,
     result_format: list,
 ):
-    has_all = "all" in result_format
-    components = {}
+    return _get_formatted_components(
+        data, ttitle, seeders, size, tracker, result_format, _STYLE_EMOJI
+    )
 
-    if has_all or "title" in result_format:
-        components["title"] = f"📄 {ttitle}"
 
-    if has_all or "video_info" in result_format:
-        info = format_video_info(data)
-        if info:
-            components["video"] = f"📹 {info}"
-
-    if has_all or "audio_info" in result_format:
-        info = format_audio_info(data)
-        if info:
-            components["audio"] = f"🔊 {info}"
-
-    if has_all or "quality_info" in result_format:
-        info = format_quality_info(data)
-        if info:
-            components["quality"] = f"⭐ {info}"
-
-    if has_all or "release_group" in result_format:
-        info = format_group_info(data)
-        if info:
-            components["group"] = f"🏷️ {info}"
-
-    if (has_all or "seeders" in result_format) and seeders is not None:
-        components["seeders"] = f"👤 {seeders}"
-
-    if has_all or "size" in result_format:
-        components["size"] = f"💾 {format_bytes(size)}"
-
-    if has_all or "tracker" in result_format:
-        components["tracker"] = f"🔎 {tracker}"
-
-    if (
-        (has_all or "languages" in result_format)
-        and hasattr(data, "languages")
-        and data.languages
-    ):
-        formatted_languages = "/".join(
-            get_language_emoji(language) for language in data.languages
-        )
-        components["languages"] = formatted_languages
-
-    return components
+def get_formatted_components_plain(
+    data: ParsedData,
+    ttitle: str,
+    seeders: int,
+    size: int,
+    tracker: str,
+    result_format: list,
+):
+    return _get_formatted_components(
+        data, ttitle, seeders, size, tracker, result_format, _STYLE_PLAIN
+    )
 
 
 def format_title(components: dict):

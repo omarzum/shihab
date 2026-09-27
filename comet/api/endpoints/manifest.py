@@ -1,11 +1,9 @@
-import random
-import string
-
 from fastapi import APIRouter, Request
 
 from comet.core.config_validation import config_check
 from comet.core.models import settings
-from comet.debrid.manager import get_debrid_extension
+from comet.debrid.manager import build_addon_name
+from comet.utils.cache import CachePolicies, cached_json_response
 
 router = APIRouter()
 
@@ -22,9 +20,9 @@ router = APIRouter()
     summary="Add-on Manifest",
     description="Returns the add-on manifest with existing configuration.",
 )
-async def manifest(request: Request, b64config: str = None):
+async def manifest(request: Request, b64config: str | None = None):
     base_manifest = {
-        "id": f"{settings.ADDON_ID}.{''.join(random.choice(string.ascii_letters) for _ in range(4))}",
+        "id": settings.ADDON_ID,
         "description": "Stremio's fastest torrent/debrid search add-on.",
         "version": "2.0.0",
         "catalogs": [],
@@ -36,12 +34,12 @@ async def manifest(request: Request, b64config: str = None):
             }
         ],
         "types": ["movie", "series", "anime", "other"],
-        "logo": "https://i.ibb.co/LVGNJ0s/icon.jpg",
-        "background": "https://i.ibb.co/spMks15Y/background.jpg",
+        "logo": "https://raw.githubusercontent.com/g0ldyy/comet/refs/heads/main/comet/assets/icon.png",
+        "background": "https://raw.githubusercontent.com/g0ldyy/comet/refs/heads/main/comet/assets/background.png",
         "behaviorHints": {"configurable": True, "configurationRequired": False},
     }
 
-    config = config_check(b64config)
+    config = config_check(b64config, strict_b64config=True)
     if not config:
         base_manifest["name"] = "❌ | Comet"
         base_manifest["description"] = (
@@ -49,9 +47,11 @@ async def manifest(request: Request, b64config: str = None):
         )
         return base_manifest
 
-    debrid_extension = get_debrid_extension(config["debridService"])
-    base_manifest["name"] = (
-        f"{settings.ADDON_NAME}{(' | ' + debrid_extension) if debrid_extension != 'TORRENT' else ''}"
-    )
+    base_manifest["name"] = build_addon_name(settings.ADDON_NAME, config)
 
-    return base_manifest
+    return cached_json_response(
+        request,
+        base_manifest,
+        cache_policy=CachePolicies.manifest(),
+        vary=["Accept"],
+    )
